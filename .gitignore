@@ -1,0 +1,5 @@
+uploads/
+__pycache__/
+node_modules/
+*.log
+tests/out/
