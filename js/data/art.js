@@ -27,7 +27,33 @@ export const SLOTS = [
   ...S(75, 84, 'terrain', 256, 256, 'tile'),
   ...S(85, 89, 'fx', 512, 512, 'fx'),
   ...S(90, 100, 'scene', 1600, 900, 'cover'),
+  // Extra set (docs/SHOTLIST-EXTRA.md)
+  ...S(101, 106, 'crest', 384, 384, 'cutout'),
+  ...S(107, 110, 'backdrop', 1600, 700, 'cover'),
+  ...S(111, 112, 'map', 2000, 1500, 'cover'),
+  ...S(113, 136, 'vignette', 800, 450, 'cover'),
+  ...S(137, 172, 'sprite', 256, 256, 'cutout'),
+  ...S(173, 190, 'scene', 1600, 900, 'cover'),
+  ...S(191, 200, 'backdrop', 1600, 700, 'cover'),
 ];
+
+// Extra-set lookups. House order matches HOUSES in houses.js.
+export const HOUSE_ORDER = ['aldmere', 'corvane', 'isolde', 'hrothgar', 'seraphine', 'vey'];
+export const CREST = Object.fromEntries(HOUSE_ORDER.map((h, i) => [h, 101 + i]));
+export const ENDING = Object.fromEntries(HOUSE_ORDER.map((h, i) => [h, 185 + i]));
+export const PROVINCE_VIGNETTE = id => 113 + id;
+export const BATTLE_BACKDROP = { plains: 107, coast: 107, forest: 108, hills: 109, mountain: 109, marsh: 110 };
+export const SEASON_MAP = [111, 10, 112, 11];         // spring, summer, autumn, winter
+// Troop sprite in house colours (fallback: neutral sprite from units.js, tinted).
+const HOUSE_TROOP_ORDER = ['footmen', 'pikes', 'archers', 'horse', 'knights', 'siege'];
+export function houseTroopSprite(house, troop) {
+  const h = HOUSE_ORDER.indexOf(house), t = HOUSE_TROOP_ORDER.indexOf(troop);
+  return h < 0 || t < 0 ? null : 137 + h * 6 + t;
+}
+export const ORDER_BACKDROP = { throne: 191, council: 192, market: 193, fields: 194, muster: 195,
+  train: 196, dikes: 197, hire: 198, diplomacy: 199, spy: 200 };
+export const EXTRA_EVENT = { spy: 173, bribe: 174, duel: 175, tribute: 176, hire: 177, captive: 178,
+  shard: 179, truce: 180, succession: 181, granaryFire: 182, refugees: 183, feast: 184 };
 export const SLOT = Object.fromEntries(SLOTS.map(s => [s.slot, s]));
 
 // Terrain tile slot per battle terrain key.
