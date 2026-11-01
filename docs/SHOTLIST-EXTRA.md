@@ -74,3 +74,35 @@ House colours (use them in prompts 101-106 and 137-172): Aldmere **blue and silv
 194 Granary and ploughed fields (develop fields) 195 Barracks with recruits (muster)
 196 Training yard with sparring soldiers (train) 197 River dikes being built with sandbags (dikes)
 198 Mercenary camp (hire) 199 Envoy's tent with banners (diplomacy) 200 Spy's den with maps and candles (spy)
+
+## Battle set (slots 201-230)
+
+The battle screen is the centrepiece, so it gets its own art. **Clash cut-ins** are wide, dramatic
+side-view action paintings, shown full-width for a moment when units fight: *"…dynamic side-view
+battle action, motion, dust and sparks, dramatic low angle, wide cinematic"*. Show the attacker on
+the left and keep the right third darker (the defender's portrait and numbers go there).
+
+**R. Clash cut-ins (13)**
+201 Footmen charging with swords and shields raised 202 A pike wall levelled against a charge
+203 An archer volley loosed into the sky 204 Light horsemen galloping at full speed
+205 Armoured knights in a lance charge 206 A catapult hurling a burning stone
+207 Wolfriders leaping over a ditch 208 A clay golem smashing through a palisade
+209 A wyvern diving with claws out 210 Ghost knights riding through fog
+211 Bandits firing crossbows from the brush 212 Druids raising a storm of thorny vines
+213 Peasant militia with pitchforks and torches
+
+**S. Spirit summoning cut-ins (5)**: the spirit appearing over a battlefield, huge, troops below for scale
+214 Ember Stag 215 Tide Serpent 216 Gale Owl 217 Stone Warden 218 Dusk Moth
+
+**T. Battle moments (7)**: wide cinematic
+219 A battering ram breaking a castle gate 220 Siege ladders against a wall
+221 A routed army fleeing across a field 222 Victorious soldiers raising a banner on a keep
+223 A general's last stand surrounded by enemies 224 Two generals crossing swords in single combat
+225 Dawn over two armies drawn up for battle (battle intro)
+
+**U. Weather overlays (3)**: full frame, on a pure black background, drawn with screen blending
+226 Falling rain streaks 227 Falling snowflakes 228 Drifting fog wisps
+
+**V. Battle UI (2)**
+229 Ornate gold-and-iron battle frame border, empty centre, flat pale grey background
+230 War drum and crossed banners emblem, flat pale grey background

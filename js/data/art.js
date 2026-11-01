@@ -35,7 +35,21 @@ export const SLOTS = [
   ...S(137, 172, 'sprite', 256, 256, 'cutout'),
   ...S(173, 190, 'scene', 1600, 900, 'cover'),
   ...S(191, 200, 'backdrop', 1600, 700, 'cover'),
+  // Battle set
+  ...S(201, 225, 'cutin', 1600, 700, 'cover'),
+  ...S(226, 228, 'fx', 1024, 1024, 'fx'),
+  ...S(229, 230, 'ui', 1024, 1024, 'cutout'),
 ];
+
+// Battle set lookups.
+export const CLASH_CUTIN = { footmen: 201, pikes: 202, archers: 203, horse: 204, knights: 205,
+  siege: 206, wolfriders: 207, golem: 208, wyvern: 209, ghosts: 210, bandits: 211, druids: 212,
+  militia: 213 };
+export const SPIRIT_CUTIN = { ember: 214, tide: 215, gale: 216, stone: 217, dusk: 218 };
+export const BATTLE_MOMENT = { gateBreach: 219, ladders: 220, rout: 221, keepTaken: 222,
+  lastStand: 223, duel: 224, intro: 225 };
+export const WEATHER_FX = { rain: 226, snow: 227, fog: 228 };
+export const BATTLE_FRAME = 229, BATTLE_EMBLEM = 230;
 
 // Extra-set lookups. House order matches HOUSES in houses.js.
 export const HOUSE_ORDER = ['aldmere', 'corvane', 'isolde', 'hrothgar', 'seraphine', 'vey'];
