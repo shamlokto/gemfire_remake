@@ -20,7 +20,7 @@ js/realm/ai.js             planHouseOrders(state, houseId, rng) -> order[]
 js/realm/turn.js           endMonth(state, resolvePlayerBattle?) drives AI orders, battles, tick
 js/battle/rules.js         createBattle(input, rng) / legalMoves / applyAction / result
 js/battle/ai.js            chooseAction(battle, side, rng)
-js/battle/auto.js          autoResolve(input, rng) -> BattleResult (runs rules+ai headless)
+js/battle/auto.js          autoResolve(input, seed) -> BattleResult (runs rules+ai headless)
 js/ui/*.js                 DOM/canvas views (mapview, panels, battleview, portraits, audio)
 tools/process_art.py       turns the 100 uploaded images into art/NNN.webp + art/manifest.json
 tools/make_placeholders.mjs writes art-placeholder/NNN.svg for every slot
@@ -37,7 +37,7 @@ must run in node, so tests can simulate whole campaigns headless.
   (in house order, starting from a rotating index), then the economy ticks.
 * Economy per province per month:
   `gold += market * 0.6 * (0.5 + loyalty/200)`;
-  autumn harvest (month 6): `food += fields * 6 * (0.5 + loyalty/200)`;
+  autumn harvest (month 6): `food += fields * 10 * (0.5 + loyalty/200)`;
   monthly food upkeep = sum over troops of `soldiers * upkeep / 100`, plus company wages in gold.
   Food < 0: lose 10% of soldiers, loyalty -10, food = 0. Gold < 0: companies desert, gold = 0.
   Loyalty drifts toward `40 + governor.charm/4`; loyalty < 20 risks a revolt event.

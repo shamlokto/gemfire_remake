@@ -38,7 +38,7 @@ export const VASSALS = [
   V('hrothgar_5','hrothgar','Kestrel Vane',       'Horse-Tamer',        68, 52, 62, 76, 'horse',   160, 6, 41),
   // Seraphine (capital 21 Sunspire, also 22 Goldvale)
   V('seraphine_0','seraphine','High Mother Aurelie', 'High Priestess',  40, 82, 90, 100, 'pikes',   180, 21, 20),
-  V('seraphine_1','seraphine','Ser Gideon Vale',  'Templar Paladin',    84, 50, 62, 92, 'knights', 200, 21, 42),
+  V('seraphine_1','seraphine','Ser Gideon Vale',  'Templar Paladin',    84, 50, 62, 92, 'knights', 160, 21, 42),
   V('seraphine_2','seraphine','The Blind Oracle', 'Oracle',             20, 95, 70, 88, 'archers', 100, 21, 43),
   V('seraphine_3','seraphine','Sister Amabel',    'Healer',             30, 70, 84, 94, 'footmen', 140, 22, 44),
   V('seraphine_4','seraphine','Inquisitor Thane', 'Inquisitor',         72, 66, 38, 80, 'knights', 160, 22, 45),

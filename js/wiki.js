@@ -107,7 +107,7 @@ function howToPlay() {
   <p>Every province earns gold each month and food once a year, at the harvest (month 7, ${esc(MONTHS[6])}).
   Loyal people work harder:</p>
   <code class="formula">gold per month  = Market × 0.6 × (0.5 + loyalty / 200)
-harvest food    = Fields × 6 × (0.5 + loyalty / 200)
+harvest food    = Fields × 10 × (0.5 + loyalty / 200)
 food upkeep     = Σ soldiers × troop upkeep / 100     (every month)
 company wages   = paid in gold every month</code>
   <p>If food runs out, troops lose 10% of their soldiers and loyalty drops by 10. If gold runs out, hired companies
