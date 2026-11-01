@@ -122,3 +122,15 @@ BattleResult = {
   portrait of each unit's vassal, spirit card and spell effect (85-89).
 * Every image goes through `art(slot)` from `js/data/art.js`, which falls back to placeholders.
 * Phone width works: panel becomes a bottom sheet.
+
+## Battle rules as built (supersede the numbers above)
+* Damage divisor is 6 (not 10); units rout below 30% of their starting soldiers (not 15%).
+* Entering a square next to an enemy ends movement (zone of control). Walls cost 3 to climb;
+  mountains block all but flyers. Spells hit enemies only.
+* Weather: spring rain (cosmetic), winter snow (ground move -1, min 1), marsh fog except in
+  winter (ranged reach -1, min 2).
+* Druids heal adjacent friends 8% at the start of their side's turn. Bewildered units stand still
+  or strike an adjacent ally at half strength.
+* The keep centre (13,5) is the objective even in field battles; first attacker on the gate (12,5)
+  raises a gate-breach event. Last Stand moment fires when a ruler's unit drops below 45%.
+* `autoResolve(input, seed)` takes a numeric seed. Realm harvest is fields x 10.
