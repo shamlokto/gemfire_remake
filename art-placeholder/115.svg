@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9ab88a"/><stop offset="1" stop-color="#1e3a20"/></linearGradient><radialGradient id="v" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>
+<rect width="800" height="450" fill="url(#g)"/>
+<path d="M0 324 Q 160 270 320 315 T 640 297 T 800 315 V 450 H 0 Z" fill="#000" fill-opacity="0.35"/>
+<path d="M0 369 Q 240 333 440.00000000000006 378 T 800 360 V 450 H 0 Z" fill="#000" fill-opacity="0.45"/>
+<g transform="translate(400 315) scale(0.9)" fill="#2a2230"><rect x="-40" y="-30" width="80" height="50"/><rect x="-55" y="-55" width="22" height="75"/><rect x="33" y="-55" width="22" height="75"/><rect x="-12" y="-75" width="24" height="45"/>
+<path d="M-55 -55 h6 v-6 h5 v6 h5 v-6 h6 v6 M33 -55 h6 v-6 h5 v6 h5 v-6 h6 v6"/><path d="M0 -75 v-22 l16 6 -16 6" fill="#c9a24a"/></g><rect width="800" height="450" fill="url(#v)"/><text x="7.8" y="442.2" font-family="Georgia,serif" font-size="13" fill="#f3e3b5" fill-opacity="0.35">115 · Greywatch</text></svg>

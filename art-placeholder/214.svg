@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" width="1600" height="700"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3048"/><stop offset="1" stop-color="#100c14"/></linearGradient><radialGradient id="v" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>
+<rect width="1600" height="700" fill="url(#g)"/>
+<path d="M0 504 Q 320 420 640 489.99999999999994 T 1280 462 T 1600 489.99999999999994 V 700 H 0 Z" fill="#000" fill-opacity="0.35"/>
+<path d="M0 574 Q 480 518 880.0000000000001 588 T 1600 560 V 700 H 0 Z" fill="#000" fill-opacity="0.45"/>
+<rect width="1600" height="700" fill="url(#v)"/><text x="12" y="688" font-family="Georgia,serif" font-size="20" fill="#f3e3b5" fill-opacity="0.35">214 · Summon: ember</text></svg>

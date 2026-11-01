@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14101c"/><stop offset="1" stop-color="#05040a"/></linearGradient><radialGradient id="v" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>
+<rect width="1024" height="1024" fill="url(#g)"/>
+<path d="M0 737.28 Q 204.8 614.4 409.6 716.8 T 819.2 675.84 T 1024 716.8 V 1024 H 0 Z" fill="#000" fill-opacity="0.35"/>
+<path d="M0 839.68 Q 307.2 757.76 563.2 860.16 T 1024 819.2 V 1024 H 0 Z" fill="#000" fill-opacity="0.45"/>
+<circle cx="512" cy="460.8" r="307.2" fill="#d6e4ff" fill-opacity="0.18"/><circle cx="512" cy="460.8" r="163.84" fill="#d6e4ff" fill-opacity="0.45"/>
+<text x="512" y="512" text-anchor="middle" font-family="Georgia,serif" font-size="143.36" fill="#fff" fill-opacity="0.85">🜁</text><rect width="1024" height="1024" fill="url(#v)"/><text x="17.4" y="1006.6" font-family="Georgia,serif" font-size="29" fill="#f3e3b5" fill-opacity="0.35">054 · Gale Owl</text></svg>

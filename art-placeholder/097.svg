@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2040"/><stop offset="1" stop-color="#0a0408"/></linearGradient><radialGradient id="v" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>
+<rect width="1600" height="900" fill="url(#g)"/>
+<path d="M0 648 Q 320 540 640 630 T 1280 594 T 1600 630 V 900 H 0 Z" fill="#000" fill-opacity="0.35"/>
+<path d="M0 738 Q 480 666 880.0000000000001 756 T 1600 720 V 900 H 0 Z" fill="#000" fill-opacity="0.45"/>
+<g transform="translate(800 630) scale(1.8)" fill="#2a2230"><rect x="-40" y="-30" width="80" height="50"/><rect x="-55" y="-55" width="22" height="75"/><rect x="33" y="-55" width="22" height="75"/><rect x="-12" y="-75" width="24" height="45"/>
+<path d="M-55 -55 h6 v-6 h5 v6 h5 v-6 h6 v6 M33 -55 h6 v-6 h5 v6 h5 v-6 h6 v6"/><path d="M0 -75 v-22 l16 6 -16 6" fill="#c9a24a"/></g><rect width="1600" height="900" fill="url(#v)"/><text x="15" y="885" font-family="Georgia,serif" font-size="25" fill="#f3e3b5" fill-opacity="0.35">097 · Night siege</text></svg>

@@ -18,6 +18,7 @@ import {
 import { chooseAction } from '../battle/ai.js';
 import { bark } from '../battle/barks.js';
 import { sfx } from './sfx.js';
+import { playSting } from './audio.js';
 import {
   art, hasArt, TERRAIN_TILE, CLASH_CUTIN, SPIRIT_CUTIN, BATTLE_MOMENT, WEATHER_FX, BATTLE_FRAME,
   BATTLE_BACKDROP, CREST, houseTroopSprite,
@@ -1017,6 +1018,7 @@ export async function runBattle(container, input, opts = {}) {
   function spiritCutin(side, spiritId) {
     const sp = SPIRITS[spiritId];
     sfx.play('spell'); sfx.play('wind');
+    try { playSting('summon'); } catch { /* audio unavailable */ }
     if (prefs.cutins === 'off') return Promise.resolve();
     const short = prefs.cutins === 'short';
     const motes = [];

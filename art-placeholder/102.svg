@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 384" width="384" height="384"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9a7d9"/><stop offset="1" stop-color="#3a3346"/></linearGradient></defs>
+<path d="M69.12 53.760000000000005 H314.88 V192 Q314.88 299.52 192 345.6 Q69.12 299.52 69.12 192 Z" fill="url(#g)" stroke="#c9a24a" stroke-width="11.52"/>
+<text x="192" y="230.39999999999998" text-anchor="middle" font-family="Georgia,serif" font-size="115.19999999999999" fill="#fff" fill-opacity="0.9">⋀</text></svg>

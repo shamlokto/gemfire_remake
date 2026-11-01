@@ -2,6 +2,8 @@
 // sfx.play(name, { volume }) — names: clash, arrows, hooves, catapult, spell, horn, rout, hit,
 // gate, win, lose, click, wind. sfx.setVolume(0..1); sfx.muted = true to silence.
 
+import { getAudioSettings } from './audio.js';
+
 let ctx = null, master = null, noiseBuf = null;
 let volume = 0.6;
 
@@ -99,7 +101,11 @@ export const sfx = {
   muted: false,
   play(name, { delay = 0 } = {}) {
     if (this.muted || !SOUNDS[name]) return;
-    try { if (!ensure()) return; SOUNDS[name](ctx.currentTime + delay + 0.01); } catch { /* audio unavailable */ }
+    // Follow the game's sound settings (mute and effects volume).
+    let st = { muted: false, sfx: 1 };
+    try { st = getAudioSettings(); } catch { /* settings unavailable */ }
+    if (st.muted || st.sfx <= 0) return;
+    try { if (!ensure()) return; master.gain.value = volume * st.sfx; SOUNDS[name](ctx.currentTime + delay + 0.01); } catch { /* audio unavailable */ }
   },
   setVolume(v) { volume = v; if (master) master.gain.value = v; },
   unlock() { try { ensure(); } catch { /* ignore */ } },

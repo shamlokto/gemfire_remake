@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 700" width="1600" height="700"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a4030"/><stop offset="1" stop-color="#140c08"/></linearGradient><radialGradient id="v" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></radialGradient></defs>
+<rect width="1600" height="700" fill="url(#g)"/>
+<path d="M0 504 Q 320 420 640 489.99999999999994 T 1280 462 T 1600 489.99999999999994 V 700 H 0 Z" fill="#000" fill-opacity="0.35"/>
+<path d="M0 574 Q 480 518 880.0000000000001 588 T 1600 560 V 700 H 0 Z" fill="#000" fill-opacity="0.45"/>
+<g transform="translate(800 525) scale(1.4)" fill="#1a1418"><rect x="-40" y="-30" width="80" height="50"/><rect x="-55" y="-55" width="22" height="75"/><rect x="33" y="-55" width="22" height="75"/><rect x="-12" y="-75" width="24" height="45"/>
+<path d="M-55 -55 h6 v-6 h5 v6 h5 v-6 h6 v6 M33 -55 h6 v-6 h5 v6 h5 v-6 h6 v6"/><path d="M0 -75 v-22 l16 6 -16 6" fill="#c9a24a"/></g><rect width="1600" height="700" fill="url(#v)"/><text x="12" y="688" font-family="Georgia,serif" font-size="20" fill="#f3e3b5" fill-opacity="0.35">196 · Order: train</text></svg>
