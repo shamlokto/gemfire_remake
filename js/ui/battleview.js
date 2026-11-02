@@ -647,9 +647,9 @@ export async function runBattle(container, input, opts = {}) {
     g.globalAlpha *= 0.4; g.drawImage(blob(0, 0, 0), cx - cs * 0.5, cy + cs * 0.22, cs, cs * 0.25); g.restore();
     const sig = artImg(SPIRIT_SIGIL[u.type]);
     if (sig) {   // a glowing summoning circle turning under the spirit (brighter while it casts)
-      const glow = (d.flash || 0), r = cs * (0.62 + glow * 0.35);
-      g.save(); g.globalCompositeOperation = 'screen';
-      g.globalAlpha = (b.spiritUsed[u.side] ? 0.35 : 0.75) + glow * 0.25;
+      const glow = (d.flash || 0), r = cs * (0.85 + glow * 0.4);
+      g.save(); g.globalCompositeOperation = 'lighter';
+      g.globalAlpha = Math.min(1, (b.spiritUsed[u.side] ? 0.55 : 0.95) + glow * 0.3);
       g.translate(cx, cy + cs * 0.3); g.scale(1, 0.45); g.rotate(t * 0.6);
       g.drawImage(sig, -r, -r, r * 2, r * 2); g.restore();
     }

@@ -109,7 +109,7 @@ export function openLandView(container, land, opts = {}) {
   const g = canvas.getContext('2d');
   let dpr = 1, cw = 0, ch = 0, tw = 64, th = 32, ox = 0, oy = 0;
   let hover = -1, sel = -1, heat = false, alive = true, raf = 0, t0 = performance.now();
-  let agents = [], smoke = [], lastT = 0, px = 0, py = 0, artTick = 0;
+  let agents = [], smoke = [], lastT = 0, px = 0, py = 0, artTick = 0, skyLayer = null;
   const terrainKey = (opts.province && opts.province.terrain) || 'plains';
   const onArt = () => { artTick++; groundCache = null; if (!palette.hidden && sel >= 0) openPalette(sel); };
 
@@ -165,16 +165,24 @@ export function openLandView(container, land, opts = {}) {
     g.save();
     g.fillStyle = '#0d1110'; g.fillRect(0, 0, cw, ch);
     const drift = Math.sin(t * 0.05) * 6;
-    if (sky) { g.globalAlpha = 1; cover(sky.img, -20 + px * -8 + drift, -20 + py * -5, cw + 40, ch * 0.75 + 40, 0.5, 0.3); }
-    if (pano) {
-      g.globalAlpha = sky ? 0.92 : 1;
-      const top = sky ? ch * 0.18 : 0;
-      cover(pano.img, -30 + px * -16, top - 10 + py * -8, cw + 60, ch - top + 20, 0.5, 0.6);
-      if (sky) {   // blend the panorama's top edge into the sky
-        const fade = g.createLinearGradient(0, top - 10, 0, top + ch * 0.18);
-        g.globalAlpha = 1;
-        fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,0)');
+    // the terrain panorama fills the view; the season's sky fades in over its upper part
+    if (pano) cover(pano.img, -30 + px * -16, -10 + py * -8, cw + 60, ch + 20, 0.5, 0.7);
+    if (sky) {
+      const key = `${season}|${cw}|${ch}|${!!pano}`;
+      if (!skyLayer || skyLayer.key !== key) {
+        const c = document.createElement('canvas'); c.width = Math.ceil(cw + 40); c.height = Math.ceil(ch * (pano ? 0.6 : 1) + 40);
+        const x = c.getContext('2d');
+        const iw = sky.img.naturalWidth, ih = sky.img.naturalHeight, k = Math.max(c.width / iw, c.height / ih);
+        x.drawImage(sky.img, (c.width - iw * k) / 2, (c.height - ih * k) * 0.3, iw * k, ih * k);
+        if (pano) {
+          x.globalCompositeOperation = 'destination-in';
+          const gr = x.createLinearGradient(0, 0, 0, c.height);
+          gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.9)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+          x.fillStyle = gr; x.fillRect(0, 0, c.width, c.height);
+        }
+        skyLayer = { key, c };
       }
+      g.drawImage(skyLayer.c, -20 + px * -8 + drift, -20 + py * -5);
     }
     g.globalAlpha = 1;
     if (season === 3) { g.fillStyle = 'rgba(210,225,240,0.18)'; g.fillRect(0, 0, cw, ch); }
