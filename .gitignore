@@ -4,3 +4,4 @@ node_modules/
 *.log
 tests/out/
 uploads2/
+uploads3/

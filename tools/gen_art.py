@@ -48,6 +48,12 @@ SECTION = {
     'Z5': ('Wide painted battlefield landscape, low horizon, empty of soldiers, dramatic sky.', '21:9'),
     'Z6': ('Wide cinematic battle painting, dynamic, dramatic lighting.', '21:9'),
     'Z7': (FX, '1:1'),
+    # Isometric battlefield set 379-478
+    'Z8': ('Isometric game unit sprite, 2:1 isometric angle, a single soldier standing ready, full body, facing down-right, small margin, plain flat pale grey background.', '1:1'),
+    'Z9': ('Isometric game unit sprite, 2:1 isometric angle, full body, facing down-right, small margin, plain flat pale grey background.', '1:1'),
+    'Z10': ('Side-view game sprite of one figure in mid-action, full body, facing right, small margin, plain flat pale grey background.', '1:1'),
+    'Z11': ('Isometric game tile, 2:1 isometric angle, a single diamond tile seen from above, centred, small margin, plain flat pale grey background.', '1:1'),
+    'Z12': ('Isometric game prop sprite, 2:1 isometric angle, centred, small margin, plain flat pale grey background.', '1:1'),
 }
 SLOT_ASPECT = {3: '1:1', 4: '5:2', 5: '5:2', 6: '5:2', 7: '5:2', 12: '1:1', 13: '1:1', 14: '1:1', 15: '1:1'}
 SLOT_EXTRA = {
@@ -62,7 +68,7 @@ def parse():
     for f in ('docs/SHOTLIST.md', 'docs/SHOTLIST-EXTRA.md'):
         for raw in open(os.path.join(ROOT, f), encoding='utf-8'):
             line = raw.strip()
-            m = re.match(r'^\*\*([A-Z][0-9]?)\. (.+?)\*\*', line)
+            m = re.match(r'^\*\*([A-Z][0-9]{0,2})\. (.+?)\*\*', line)
             if m:
                 cur = m.group(1)
                 house = None

@@ -55,7 +55,29 @@ export const SLOTS = [
   ...S(321, 344, 'backdrop', 1600, 700, 'cover'),
   ...S(345, 368, 'cutin', 1600, 700, 'cover'),
   ...S(369, 378, 'fx', 512, 512, 'fx'),
+  // Isometric battlefield set (Z8-Z12)
+  ...S(379, 434, 'isounit', 320, 320, 'cutout'),
+  ...S(435, 458, 'fighter', 320, 320, 'cutout'),
+  ...S(459, 478, 'isosprite', 384, 384, 'cutout'),
 ];
+
+// Isometric battle board art (Z8-Z12).
+const ISO_TROOPS = ['footmen', 'pikes', 'archers', 'horse', 'knights', 'siege'];
+const ISO_HOUSES = ['aldmere', 'corvane', 'isolde', 'hrothgar', 'seraphine', 'vey'];
+export function isoUnitSprite(house, type) {
+  const h = ISO_HOUSES.indexOf(house), t = ISO_TROOPS.indexOf(type);
+  if (h >= 0 && t >= 0) return 379 + h * 6 + t;
+  return ISO_OTHER[type] ?? null;
+}
+export const ISO_OTHER = { wolfriders: 415, golem: 416, wyvern: 417, ghosts: 418, bandits: 419, druids: 420, sellswords: 421,
+  trolls: 422, harpies: 423, lizardfolk: 424, skeletons: 425, giants: 426, arquebusiers: 427, bombard: 428, militia: 429,
+  ember: 430, tide: 431, gale: 432, stone: 433, dusk: 434 };
+export const FIGHTER = { footmenSwing: 435, footmenBlock: 436, pikesThrust: 437, pikesBrace: 438, archersDraw: 439, archersLoose: 440,
+  horse: 441, knights: 442, siege: 443, fall: 444, flee: 445, banner: 446, wolfriders: 447, trolls: 448, arquebusiers: 449,
+  giants: 450, skeletons: 451, lizardfolk: 452, harpies: 453, sellswords: 454, militia: 455, general: 456, druids: 457, ghosts: 458 };
+export const ISO_TERRAIN = { grass: 459, forest: 460, hills: 461, mountain: 462, water: 463, bridge: 464, road: 465, marsh: 466,
+  sand: 467, snow: 468, farmland: 469, lava: 470, ruins: 471, ice: 472 };
+export const ISO_PROP = { wall: 473, gate: 474, keep: 475, palisade: 476, tents: 477, ladder: 478 };
 
 // Land view art (Z1-Z4).
 export const LAND_BUILDING = { farm: 279, mill: 280, orchard: 281, vineyard: 282, pasture: 283, lumber: 284,

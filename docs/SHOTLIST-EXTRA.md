@@ -206,3 +206,40 @@ drawn on the land board in place of the procedural buildings; they must read at 
 369 Fiery explosion burst with debris 370 Billowing white gunpowder smoke cloud 371 Rolling brown dust cloud 372 Shower of bright sparks
 373 Glowing magic sigil circle in orange fire 374 Glowing magic sigil circle in blue water 375 Glowing magic sigil circle in white lightning
 376 Glowing magic sigil circle in brown stone 377 Glowing magic sigil circle in violet shadow 378 Expanding golden shockwave ring
+
+## Isometric battlefield set (slots 379-478)
+
+The battle board becomes an isometric 3D board like the land view, with many more terrains, and
+the soldiers in the fighting animations get painted sprites. All sprites: one subject, centred,
+small margin, plain flat pale grey background, so they can be cut out.
+
+**Z8. Isometric soldiers in house colours (36)**: isometric game unit sprite, 2:1 isometric angle, a single soldier standing ready, full body, facing down-right, house colours on armour, shield and pennant, plain flat pale grey background
+379 Aldmere footman in blue and silver 380 Aldmere pikeman in blue and silver 381 Aldmere archer in blue and silver 382 Aldmere light horseman in blue and silver 383 Aldmere knight in blue and silver 384 Aldmere catapult crew in blue and silver
+385 Corvane footman in black and violet 386 Corvane pikeman in black and violet 387 Corvane archer in black and violet 388 Corvane light horseman in black and violet 389 Corvane knight in black and violet 390 Corvane catapult crew in black and violet
+391 Isolde footman in teal and white 392 Isolde pikeman in teal and white 393 Isolde archer in teal and white 394 Isolde light horseman in teal and white 395 Isolde knight in teal and white 396 Isolde catapult crew in teal and white
+397 Hrothgar footman in brown and amber 398 Hrothgar pikeman in brown and amber 399 Hrothgar archer in brown and amber 400 Hrothgar light horseman in brown and amber 401 Hrothgar knight in brown and amber 402 Hrothgar catapult crew in brown and amber
+403 Seraphine footman in white and gold 404 Seraphine pikeman in white and gold 405 Seraphine archer in white and gold 406 Seraphine light horseman in white and gold 407 Seraphine knight in white and gold 408 Seraphine catapult crew in white and gold
+409 Vey footman in green and bronze 410 Vey pikeman in green and bronze 411 Vey archer in green and bronze 412 Vey light horseman in green and bronze 413 Vey knight in green and bronze 414 Vey catapult crew in green and bronze
+
+**Z9. Isometric companies, militia and spirits (20)**: isometric game unit sprite, 2:1 isometric angle, full body, facing down-right, plain flat pale grey background
+415 Wolfrider on a great grey wolf 416 Clay golem 417 Wyvern with spread wings 418 Ghostly knight on a spectral horse 419 Bandit crossbowman
+420 Druid with a staff of living wood 421 Grizzled sellsword 422 Cave troll with a club 423 Harpy in flight 424 Lizardfolk spearman
+425 Skeleton legionary 426 Hill giant 427 Arquebusier with a smoking matchlock 428 Bronze bombard cannon with crew 429 Peasant militia with a pitchfork
+430 Ember Stag spirit of living flame 431 Tide Serpent spirit of glowing water 432 Gale Owl spirit wreathed in lightning 433 Stone Warden spirit of mossy rock 434 Dusk Moth spirit with violet wings
+
+**Z10. Fighting soldiers, side view (24)**: side-view game sprite of one soldier in mid-action, full body, facing right, neutral grey-and-white heraldry, plain flat pale grey background
+435 Footman swinging a sword overhead 436 Footman blocking with a shield 437 Pikeman thrusting a long pike 438 Pikeman bracing a pike against a charge
+439 Archer drawing a longbow 440 Archer loosing an arrow 441 Light horseman galloping with a raised sabre 442 Knight charging with a couched lance
+443 Catapult crew hauling the arm 444 Soldier falling backwards, struck 445 Soldier fleeing, looking back in fear 446 Standard bearer holding a banner high
+447 Wolfrider lunging 448 Troll swinging a club 449 Arquebusier firing with a burst of smoke 450 Giant hurling a boulder
+451 Skeleton raising a rusty sword 452 Lizardfolk thrusting a spear 453 Harpy diving with talons out 454 Sellsword with axe raised
+455 Militia peasant jabbing a pitchfork 456 General on horseback pointing a sword forward 457 Druid casting a spell of vines 458 Ghost knight charging through mist
+
+**Z11. Isometric battle terrain tiles (14)**: isometric game tile, 2:1 isometric angle, a single diamond tile seen from above, centred, plain flat pale grey background
+459 Grass meadow 460 Dense forest clump 461 Rocky hill 462 Snowy mountain peak 463 River water 464 Wooden bridge over water
+465 Dirt road 466 Reedy marsh 467 Sandy beach 468 Snowfield 469 Ploughed farmland 470 Cracked lava rock with glowing seams
+471 Ancient ruined pillars on grass 472 Frozen lake ice
+
+**Z12. Isometric battle props (6)**: isometric game prop sprite, 2:1 isometric angle, centred, plain flat pale grey background
+473 Castle wall section with battlements 474 Castle gatehouse 475 Castle keep tower with a banner 476 Wooden palisade
+477 Army tents with banners 478 Siege ladder against a broken wall
