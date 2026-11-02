@@ -91,6 +91,8 @@ export function createBattle(input, seed = 1) {
       x: 0, y: 0, moved: false, acted: false, out: null,   // out: null | 'routed' | 'dead' | 'fled'
       slowed: 0, confused: 0,
       flying: !!st.flying, ghost: !!st.ignoresTerrain,
+      // Optional realm modifiers (techs, terrain): multiply attack / divide damage taken.
+      atkBonus: u.atkBonus > 0 ? u.atkBonus : 1, defBonus: u.defBonus > 0 ? u.defBonus : 1,
     };
   };
   const att = armyOf(input.attacker, 'attacker').map(u => mk(u, 'attacker'));
@@ -272,7 +274,8 @@ export function bonusAgainst(b, att, tgt) {
 export function expectedKills(b, att, tgt, mult = 1, at = null) {
   const sa = statsOf(att.type), st = statsOf(tgt.type);
   const def = st.def * terrainDef(b, tgt, at ? at.x : tgt.x, at ? at.y : tgt.y) * DAMAGE_DIV;
-  const k = att.soldiers * sa.atk * (1 + att.might / 200) * (0.7 + att.training / 333) * bonusAgainst(b, att, tgt) * mult / def;
+  const k = att.soldiers * sa.atk * (1 + att.might / 200) * (0.7 + att.training / 333) * bonusAgainst(b, att, tgt) * mult *
+    (att.atkBonus || 1) / (def * (tgt.defBonus || 1));
   return Math.min(tgt.soldiers, k);
 }
 

@@ -3,7 +3,8 @@
 
 import { RANDOM_EVENTS } from '../data/events.js';
 import { COMPANIES } from '../data/units.js';
-import { PROVINCES, seasonOf, NEUTRAL_MILITIA } from '../data/world.js';
+import { PROVINCES, seasonOf, NEUTRAL_MILITIA, ADJACENCY } from '../data/world.js';
+import { techEffect } from './tech.js';
 import {
   governorOf, provinceUpkeep, addLog, provinceName, isPlayerControlled,
 } from './state.js';
@@ -21,9 +22,27 @@ export const DESERT_UNPAID = 0.05;     // unpaid troops: this share deserts each
 const clamp = (x, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
 const loyaltyFactor = pr => 0.5 + pr.loyalty / 200;
 
-export function goldIncome(pr) { return Math.round(pr.market * GOLD_RATE * loyaltyFactor(pr)); }
-export function harvestYield(pr) { return Math.round(pr.fields * HARVEST_RATE * loyaltyFactor(pr)); }
-export function companyWage(pr) { return pr.company ? COMPANIES[pr.company.type].wage : 0; }
+// `state` is optional in these helpers: without it, tech bonuses are ignored (old callers/tests).
+const owns = (state, pr) => (state ? pr.owner : null);
+export function goldIncome(pr, state = null) {
+  const h = owns(state, pr);
+  let g = pr.market * GOLD_RATE * loyaltyFactor(pr) * (1 + techEffect(state, h, 'gold'));
+  const trade = techEffect(state, h, 'tradeGold');
+  if (trade) g += Math.min(4, trade * ADJACENCY[pr.id].filter(n => state.provinces[n].owner === h).length);
+  return Math.round(g);
+}
+export function harvestYield(pr, state = null) {
+  const h = owns(state, pr);
+  const high = ['hills', 'mountain'].includes(PROVINCES[pr.id]?.terrain) ? techEffect(state, h, 'highHarvest') : 0;
+  return Math.round(pr.fields * HARVEST_RATE * loyaltyFactor(pr) * (1 + techEffect(state, h, 'harvest') + high));
+}
+// Monster companies are cheaper with Beast-Taming.
+export function companyDiscount(state, house, type) {
+  return COMPANIES[type]?.monster ? 1 + techEffect(state, house, 'monsterCost') : 1;
+}
+export function companyWage(pr, state = null) {
+  return pr.company ? Math.round(COMPANIES[pr.company.type].wage * companyDiscount(state, owns(state, pr), pr.company.type)) : 0;
+}
 export function troopPay(pr) { return Math.round(pr.units.reduce((a, u) => a + u.soldiers, 0) / SOLDIERS_PER_GOLD); }
 export function loyaltyTarget(state, pid) {
   const g = governorOf(state, pid);
@@ -44,7 +63,10 @@ export function applyEffect(state, pr, effect) {
 }
 
 function fireEvent(state, pr, ev) {
-  applyEffect(state, pr, ev.effect);
+  // Granaries halve the food that famine and storms spoil.
+  const foodLoss = techEffect(state, pr.owner, 'foodLoss');
+  const eff = foodLoss && ev.effect.foodPct < 0 ? { ...ev.effect, foodPct: ev.effect.foodPct * (1 - foodLoss) } : ev.effect;
+  applyEffect(state, pr, eff);
   const text = ev.text.replace('{province}', provinceName(pr.id));
   addLog(state, `${ev.title}: ${text}`, 'event', ev.art);
   if (isPlayerControlled(state, pr.owner)) state.pendingEvents.push({ art: ev.art, title: ev.title, text });
@@ -62,14 +84,16 @@ export function monthlyTick(state, rng) {
       continue;
     }
     // Income
-    pr.gold += goldIncome(pr);
+    pr.gold += goldIncome(pr, state);
     if (state.month === HARVEST_MONTH) {
-      const y = harvestYield(pr);
+      const y = harvestYield(pr, state);
       pr.food += y;
     }
+    const regrow = techEffect(state, pr.owner, 'fieldsRegrow');
+    if (regrow && pr.fields < 60) pr.fields = clamp(pr.fields + regrow);
     // Upkeep
-    pr.food -= Math.round(provinceUpkeep(state, pr.id));
-    pr.gold -= companyWage(pr) + troopPay(pr);
+    pr.food -= Math.round(foodUpkeep(state, pr));
+    pr.gold -= companyWage(pr, state) + troopPay(pr);
     if (pr.food < 0) {
       pr.food = 0;
       for (const u of pr.units) u.soldiers = Math.floor(u.soldiers * 0.9);
@@ -101,10 +125,15 @@ export function monthlyTick(state, rng) {
     for (const ev of RANDOM_EVENTS) {
       if (!ev.chance || !ev.seasons.includes(s)) continue;
       let p = ev.chance;
-      if (ev.floodable) p *= 1 - pr.dikes / 120;
+      if (ev.floodable) p *= (1 - pr.dikes / 120) * (1 - techEffect(state, pr.owner, 'floodChance'));
       if (rng.chance(p)) { fireEvent(state, pr, ev); break; }
     }
   }
+}
+
+// Food eaten by a province's troops this month (Granaries cut it).
+export function foodUpkeep(state, pr) {
+  return provinceUpkeep(state, pr.id) * (1 + techEffect(state, pr.owner, 'upkeep'));
 }
 
 // Forecast for the UI: what a province will gain or lose next month.
@@ -112,10 +141,10 @@ export function forecast(state, pid) {
   const pr = state.provinces[pid];
   if (!pr.owner) return null;
   return {
-    gold: goldIncome(pr) - companyWage(pr) - troopPay(pr),
+    gold: goldIncome(pr, state) - companyWage(pr, state) - troopPay(pr),
     pay: troopPay(pr),
-    food: -Math.round(provinceUpkeep(state, pid)),
-    harvest: harvestYield(pr),
+    food: -Math.round(foodUpkeep(state, pr)),
+    harvest: harvestYield(pr, state),
     loyaltyTarget: Math.round(loyaltyTarget(state, pid)),
     name: PROVINCES[pid].name,
   };

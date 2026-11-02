@@ -1,19 +1,22 @@
 // All-AI campaigns: N seeds, up to 60 years each. Asserts no exceptions, JSON round-trips, and
 // determinism (same seed -> same final hash). Reports winners and game length.
-//   node tests/aivai.mjs [N=12] [years=60]      STUB=1 forces the stub battle resolver
+//   node tests/aivai.mjs [N=12] [years=60] [scenario=eclipse|all]   STUB=1 forces the stub resolver
 import { newGame, stateHash, ownedProvinces, aliveHouses } from '../js/realm/state.js';
 import { endMonth } from '../js/realm/turn.js';
 import { HOUSES } from '../js/data/houses.js';
 import { getAutoResolve } from './_resolver.mjs';
 import { MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../js/data/units.js';
 
+import { SCENARIOS } from '../js/data/scenarios.js';
 const N = Number(process.argv[2] || 12);
 const YEARS = Number(process.argv[3] || 60);
+const SC_ARG = process.argv[4] || 'eclipse';
+const SC_LIST = SC_ARG === 'all' ? SCENARIOS.map(x => x.id) : [SC_ARG];
 const { autoResolve, real } = await getAutoResolve();
 
-async function campaign(seed) {
+async function campaign(seed, scenario) {
   const player = HOUSES[seed % HOUSES.length].id;
-  let s = newGame(player, seed);
+  let s = newGame(player, seed, scenario);
   s.autoPlayer = true;
   let battles = 0;
   for (let m = 0; m < YEARS * 12 && !s.winner; m++) {
@@ -27,7 +30,9 @@ async function campaign(seed) {
     }
     checkInvariants(s);
   }
-  return { seed, winner: s.winner, years: s.turn / 12, battles, hash: stateHash(s),
+  const techs = Object.values(s.houses).reduce((a, h) => a + h.tech.researched.length, 0);
+  const recruited = Object.values(s.vassals).filter(v => v.house && (v.id.startsWith('w_'))).length;
+  return { seed, scenario, winner: s.winner, years: s.turn / 12, battles, hash: stateHash(s), techs, recruited,
     provinces: Object.fromEntries(aliveHouses(s).map(h => [h, ownedProvinces(s, h).length])) };
 }
 
@@ -62,23 +67,25 @@ function checkInvariants(s) {
   if (s.marches.length) throw new Error('marches left after month end');
 }
 
+let failed = false;
+for (const SC of SC_LIST) {
 const t0 = Date.now();
 const results = [];
-let failed = false;
 for (let seed = 1; seed <= N; seed++) {
-  try { results.push(await campaign(seed)); }
-  catch (e) { failed = true; console.log(`seed ${seed}: EXCEPTION ${e.stack}`); }
+  try { results.push(await campaign(seed, SC)); }
+  catch (e) { failed = true; console.log(`${SC} seed ${seed}: EXCEPTION ${e.stack}`); }
 }
 // Determinism on the first two seeds.
 for (const r of results.slice(0, 2)) {
-  const again = await campaign(r.seed);
-  if (again.hash !== r.hash) { failed = true; console.log(`seed ${r.seed}: nondeterministic (${r.hash} vs ${again.hash})`); }
+  const again = await campaign(r.seed, SC);
+  if (again.hash !== r.hash) { failed = true; console.log(`${SC} seed ${r.seed}: nondeterministic (${r.hash} vs ${again.hash})`); }
 }
 const wins = {};
 for (const r of results) wins[r.winner || 'none'] = (wins[r.winner || 'none'] || 0) + 1;
 const ended = results.filter(r => r.winner);
 const avg = ended.reduce((a, r) => a + r.years, 0) / (ended.length || 1);
-console.log(`resolver: ${real ? 'battle/auto.js' : 'stub'}; ${results.length} campaigns in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-for (const r of results) console.log(`  seed ${r.seed}: ${r.winner || 'no winner'} in ${r.years.toFixed(1)} y, ${r.battles} battles ${r.winner ? '' : JSON.stringify(r.provinces)}`);
+console.log(`== scenario ${SC}: resolver ${real ? 'battle/auto.js' : 'stub'}; ${results.length} campaigns in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+for (const r of results) console.log(`  seed ${r.seed}: ${r.winner || 'no winner'} in ${r.years.toFixed(1)} y, ${r.battles} battles, ${r.techs} techs, ${r.recruited} wanderers recruited ${r.winner ? '' : JSON.stringify(r.provinces)}`);
 console.log('wins:', JSON.stringify(wins), `avg length ${avg.toFixed(1)} years`);
+}
 if (failed) process.exit(1);

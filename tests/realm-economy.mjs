@@ -19,8 +19,11 @@ test('newGame layout (28 provinces, units apart from vassals)', () => {
     assert.ok(p.militia.length >= 1 && p.militia.length <= 3 && t >= 60 && t <= 140, JSON.stringify(p.militia));
     assert.equal(p.units.length, 0);
   }
-  assert.equal(Object.keys(s.vassals).length, 36);
-  for (const v of Object.values(s.vassals)) {
+  const active = Object.values(s.vassals).filter(v => v.status === 'active');
+  assert.equal(active.length, 36);
+  assert.equal(Object.values(s.vassals).filter(v => v.status === 'wandering').length, 30);
+  assert.equal(Object.values(s.vassals).filter(v => v.status === 'future').length, 6);
+  for (const v of active) {
     assert.ok(s.provinces[v.location].vassals.includes(v.id));
     assert.equal(v.soldiers, undefined);
     const led = s.provinces[v.location].units.filter(u => u.leader === v.id);

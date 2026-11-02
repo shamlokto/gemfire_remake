@@ -107,9 +107,52 @@ the left and keep the right third darker (the defender's portrait and numbers go
 229 Ornate gold-and-iron battle frame border, empty centre, flat pale grey background
 230 War drum and crossed banners emblem, flat pale grey background
 
-## Island provinces (slots 231-234)
-Same style as the province vignettes (M): small wide painting of the place.
+**W. Island provinces (4)**: same style as the province vignettes (M), small wide painting of the place
 231 Westreach: a windswept hill-fort on a western isle, a stone causeway leading to it across the sea
 232 Cairnholm: a mountain of cairns and cliffs at the end of the western isle, seabirds below
 233 Sunderisle: a sun-bleached harbour town on a southern island
 234 Emberrock: a smoking volcanic islet with a lonely watch-tower
+
+**X. Wanderers and heirs (36)**: portrait style (C), bust portrait, facing slightly left, dark vignette background
+235 Orla Fenmarch, Hedge Knight: a weathered hedge knight with a dented helm under her arm, frost in her braids
+236 Tamsin Greaves, Exiled Captain: a grim exiled captain in a patched grey cloak, scar across the lip
+237 Bors Ashcombe, Lighthouse Keeper: an old lighthouse keeper with a lantern and a fisherman's jumper, kind eyes
+238 Ilse Varrow, Sea-Witch: a sea-witch with shells woven in her silver hair, glowing blue tattoos
+239 Dunstan Coldwater, Ice Fisher: a broad ice fisher in furs holding a long harpoon, breath steaming
+240 Mira of the Pass, Mountain Guide: a lean mountain guide with a climbing axe and goggles pushed up, wind-burned cheeks
+241 Gareth Ironhand, Smith-Lord: a soot-stained smith-lord with an iron prosthetic hand and leather apron
+242 Wren Thistle, Outlaw Archer: a young outlaw archer in a green hood with a fletched arrow behind her ear
+243 Brother Hollis, Wandering Monk: a gentle wandering monk with a shaved head, prayer beads and a walking staff
+244 Cassia Saltwind, Caravan Mistress: a shrewd caravan mistress in layered silks with a ledger and a jewelled dagger
+245 Roderick Vane, Disgraced Knight: a disgraced knight with a broken spur and a torn tabard, proud jaw
+246 Elowen Rook, Forest Warden: a forest warden with oak-leaf pauldrons and a falcon on her shoulder
+247 Master Quill, Royal Cartographer: an elderly royal cartographer with spectacles, ink-stained fingers and rolled maps
+248 Sister Hale, Keeper of the Lantern: a lantern-keeper nun in pale robes holding a cracked glass lantern
+249 Alaric Dawnmere, Pretender Prince: a handsome young pretender prince with a thin circlet and a too-large cloak
+250 Old Bram Miller, Miller's Champion: a burly old miller with flour on his forearms and a great two-handed flail
+251 Sorrel Quickfoot, Courier: a wiry courier in a riding coat with message tubes on a bandolier
+252 Joss Amberly, Free Company Sergeant: a gruff free-company sergeant with a halberd and a mismatched breastplate
+253 Lys Goldenreed, Harvest Priestess: a harvest priestess crowned with wheat, sun-browned, warm smile
+254 Nyx Hollowbrook, Bog Seer: a bog seer with mud-streaked robes, a staff of twisted roots and pale green eyes
+255 Corwin Reedhollow, Eel Baron: a self-styled eel baron in a fur-trimmed coat over waders, gold tooth
+256 Tobiah Sund, Pearl Merchant: a pearl merchant with a string of pearls, a velvet cap and a sly look
+257 Captain Maren Blythe, Corsair: a corsair captain with a tricorn hat, salt-stained coat and a cutlass
+258 Hugo Westbrand, Causeway Warden: a causeway warden in a rain cloak with a lantern pole and a heavy pike
+259 Greta Stonecairn, Clan Outcast: a towering clan outcast with braided red hair, a hammer and a broken torc
+260 Fennick the Fox, Thief-Lord: a smiling thief-lord in a fox-fur collar, many rings, one gold earring
+261 Aurek Cliffborn, Eagle Rider: a cliff-dweller eagle rider in feathered leathers with a long spear
+262 Solenne Brightwater, Island Physician: an island physician with a satchel of herbs, rolled sleeves and calm eyes
+263 Ember Vask, Volcano Hermit: a volcano hermit with ash-grey skin, glowing ember eyes and a basalt staff
+264 Isa Cinderfall, Firebrand: a fiery young firebrand knight with scorched armour and a burning brand
+265 Rowan Aldmere, Heir of the River: a young heir of a river house, silver-blond, blue doublet with an otter brooch
+266 Sable Corvane, Raven Princess: a pale raven princess with black feathers in her hair and a cold, clever gaze
+267 Marco Isolde, Merchant Heir: a charming merchant heir in teal silk with a compass pendant
+268 Brynja Hrothgar, Clan Heir: a fierce young clan heir with red braids, fur cloak and a bronze torc
+269 Aurel of Seraphine, Acolyte-Knight: a radiant acolyte-knight in white and gold armour with a sun emblem
+270 Reed Vey, Marsh Heir: a lanky marsh heir with a reed crown, green leathers and a longbow
+
+**Y. Clash cut-ins for new companies (8)**: same style as the clash cut-ins (R)
+271 Sellswords in mismatched armour charging with swords and axes 272 Cave trolls smashing through a shield wall with clubs
+273 Harpies diving out of a stormy sky with talons out 274 Lizardfolk warriors bursting out of marsh water with spears
+275 A skeleton legion marching in tight ranks through mist 276 Hill giants hurling boulders at a castle wall
+277 Arquebusiers firing a volley in a cloud of white smoke 278 A bombard cannon firing with a great flash and recoil

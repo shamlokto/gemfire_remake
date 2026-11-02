@@ -12,7 +12,8 @@ import {
   spiritPower, housePower, captivesOf, isRuler, provinceUpkeep, envoyOf, availableSpirit,
   provinceArmyPower,
 } from './state.js';
-import { DEVELOP_COST, FEAST_FOOD, MAX_MARCH, musterCost } from './orders.js';
+import { DEVELOP_COST, FEAST_FOOD, MAX_MARCH, musterCost, hireOptions } from './orders.js';
+import { averageLoyalty, techEffect } from './tech.js';
 import { truceChance, bribeCost, bribeChance, biggestThreat } from './diplomacy.js';
 import { HARVEST_MONTH, goldIncome, companyWage, troopPay, SOLDIERS_PER_GOLD } from './economy.js';
 
@@ -27,6 +28,9 @@ export const TUNING = {
   aggression: 0.6,         // chance per province per month to consider attacking a house
   raiseGold: 160,          // gold (after reserve) before raising a new unit in peacetime
   coalition: 0.2,          // attack margin given up against the leading house (balance of power)
+  closingProvinces: 12,    // a house with this many provinces always considers attacking ...
+  closingBonus: 0.25,      // ... and accepts this much less margin
+  finishingProvinces: 16,  // past this, the margin drops again (the last holdouts must fall)
 };
 
 // The house everyone fears: most provinces (at least 7) or 3+ shards.
@@ -76,7 +80,8 @@ export function planHouseOrders(state, house, rng) {
   if (!owned.length) return orders;
   const dist = frontierDistance(state, house);
   const early = state.turn < 48;
-  const ctx = { dist, early, incoming: {}, incomingUnits: {}, diplomacyDone: false, spiritQueued: false, queued: {}, leader: leadingHouse(state) };
+  const ctx = { dist, early, incoming: {}, incomingUnits: {}, diplomacyDone: false, spiritQueued: false, queued: {}, leader: leadingHouse(state),
+    shards: state.provinces.some(p => p.owner === house && p.shard), avgLoyalty: averageLoyalty(state, house), studied: 0 };
 
   // Free actions first: leaders for the biggest units.
   for (const pr of owned) orders.push(...assignLeaders(state, pr));
@@ -129,21 +134,26 @@ function planProvince(state, house, pr, rng, ctx) {
 
   // --- Emergency: hungry or rebellious ---
   if (pr.loyalty < 30 && pr.food >= FEAST_FOOD * 2 && !foodTight) return { province: pid, type: 'govern', kind: 'feast' };
+  // Shard holders keep the people content: loyalty charges the spirits.
+  if (ctx.shards && pr.loyalty < 55 && ctx.avgLoyalty < 65 && pr.food >= FEAST_FOOD * 3 && !foodTight && !threatened) {
+    return { province: pid, type: 'govern', kind: 'feast' };
+  }
 
   // --- Drill green units before raising more (unless the enemy is at the gate) ---
   const raw = units.filter(u => u.training < TUNING.minMarchTraining + 5);
   if (raw.length && !threatened) return { province: pid, type: 'train' };
 
   // --- Reinforce or raise ---
-  const m = planMuster(state, pr, units, threatened, foodTight, ctx);
+  const m = ctx.shards && pr.loyalty < 40 && !threatened ? null : planMuster(state, pr, units, threatened, foodTight, ctx);
   if (m) return m;
 
   // --- Hire a company when threatened and rich ---
   if (threatened && !pr.company && rng.chance(0.5)) {
-    const options = Object.entries(COMPANIES).filter(([, c]) => pr.gold >= c.hire + c.wage * 4 + RESERVE_GOLD);
+    const options = hireOptions(state, pid).filter(o => !o.locked && pr.gold >= o.cost + o.wage * 4 + RESERVE_GOLD &&
+      !(ctx.shards && COMPANIES[o.type].loyaltyHit));
     if (options.length) {
-      options.sort((a, b) => unitPower(b[0], b[1].size, 60, 0) / b[1].hire - unitPower(a[0], a[1].size, 60, 0) / a[1].hire);
-      return { province: pid, type: 'hire', company: options[0][0] };
+      options.sort((a, b) => unitPower(b.type, b.size, 60, 0) / b.cost - unitPower(a.type, a.size, 60, 0) / a.cost);
+      return { province: pid, type: 'hire', company: options[0].type };
     }
   }
 
@@ -170,14 +180,20 @@ function planProvince(state, house, pr, rng, ctx) {
     const d = develop(pr, foodTight, state);
     if (d) return d;
   }
+  // --- Study: scholars at the capital, or wherever there is nothing better to do ---
+  if (vs.length && ctx.studied < 2 && !threatened && (state.houses[house].capital === pid ? rng.chance(0.35) : rng.chance(0.15))) {
+    ctx.studied++;
+    return { province: pid, type: 'study' };
+  }
   if (green.length) return { province: pid, type: 'train' };
-  if (pr.gold < 20 && pr.loyalty > 60) return { province: pid, type: 'govern', kind: 'tax' };
-  return { province: pid, type: 'rest' };
+  if (pr.gold < 20 && pr.loyalty > (ctx.shards ? 75 : 60)) return { province: pid, type: 'govern', kind: 'tax' };
+  return vs.length && rng.chance(0.5) ? { province: pid, type: 'study' } : { province: pid, type: 'rest' };
 }
 
 // Troop type for a new unit, by what the province already has and can afford.
-function newUnitType(pr, gold) {
+function newUnitType(pr, gold, closing = false) {
   const have = t => pr.units.filter(u => u.type === t).length;
+  if (closing && !have('siege') && gold > 250) return 'siege';
   if (!have('archers')) return 'archers';
   if (!have('pikes') && have('footmen') >= 1) return 'pikes';
   if (gold > 600 && have('knights') < 2) return 'knights';
@@ -190,7 +206,7 @@ function planMuster(state, pr, units, threatened, foodTight, ctx) {
   const spend = Math.max(0, pr.gold - RESERVE_GOLD);
   // Monthly budget: soldiers we can still pay for out of this province's income (plus savings
   // spread over two years when rich).
-  const net = goldIncome(pr) - companyWage(pr) - troopPay(pr) + Math.floor(pr.gold / 24);
+  const net = goldIncome(pr, state) - companyWage(pr, state) - troopPay(pr) + Math.floor(pr.gold / 24);
   const payRoom = Math.max(0, net) * SOLDIERS_PER_GOLD;
   if (payRoom < 40 && !threatened) return null;
   // Top up the weakest unit first.
@@ -207,7 +223,7 @@ function planMuster(state, pr, units, threatened, foodTight, ctx) {
   // the frontier, or when rich.
   const frontier = ctx.dist[pr.id] <= 1;
   if (pr.units.length < MAX_UNITS_PER_PROVINCE && ((spend >= TUNING.raiseGold && pr.units.length < 6) || (threatened && spend >= 60) || (frontier && pr.units.length < 4 && spend >= 100))) {
-    const type = newUnitType(pr, spend);
+    const type = newUnitType(pr, spend, state.provinces.filter(p => p.owner === pr.owner).length >= TUNING.closingProvinces && ctx.dist[pr.id] <= 1);
     const n = Math.min(300, threatened ? 300 : payRoom, Math.floor(spend * 0.8 / TROOPS[type].cost) * 10);
     if (n >= 60) return { province: pr.id, type: 'muster', troop: type, soldiers: n };
   }
@@ -219,7 +235,7 @@ function develop(pr, foodTight, state) {
   if (pr.dikes < 40 && state.month >= 8 && pr.fields > 30) kind = 'dikes';
   else if (foodTight || pr.fields < pr.market) kind = pr.fields < 100 ? 'fields' : 'market';
   else kind = pr.market < 100 ? 'market' : 'fields';
-  if (pr[kind] >= 100) return { province: pr.id, type: 'rest' };
+  if (pr[kind] >= 100) return null;
   return { province: pr.id, type: 'develop', kind };
 }
 
@@ -227,7 +243,11 @@ function chooseAttack(state, house, pr, vs, units, ctx, rng) {
   const fighters = units.filter(u => u.soldiers >= TUNING.minMarchSoldiers && u.training >= TUNING.minMarchTraining)
     .sort((a, b) => troopPower(state, b) - troopPower(state, a) || (a.uid < b.uid ? -1 : 1));
   if (!fighters.length) return null;
-  const warlike = rng.chance(TUNING.aggression);
+  // A house close to ruling the realm presses on to finish the war.
+  const mine = state.provinces.filter(p => p.owner === house).length;
+  const closing = mine >= TUNING.closingProvinces;
+  const finishing = mine >= TUNING.finishingProvinces;
+  const warlike = closing || rng.chance(TUNING.aggression);
   const spirit = !ctx.spiritQueued ? availableSpirit(state, house) : null;
   const fifth = spirit && spiritPower(spirit) >= companyPower(pr.company) ? 'spirit' : pr.company ? 'company' : null;
   const fifthPower = fifth === 'spirit' ? spiritPower(spirit) : fifth === 'company' ? companyPower(pr.company) : 0;
@@ -236,7 +256,8 @@ function chooseAttack(state, house, pr, vs, units, ctx, rng) {
     const t = state.provinces[n];
     if (t.owner === house || (t.owner && atPeace(state, house, t.owner))) continue;
     if (t.owner && !warlike) continue;
-    const def = Math.max(provinceDefence(state, n) * 0.25, provinceDefence(state, n) - TUNING.followUp * (ctx.queued[n] || 0)) + 1;
+    const raw = provinceDefence(state, n) * (1 + techEffect(state, t.owner, 'homeDef')) / (1 + techEffect(state, house, 'troopAtk'));
+    const def = Math.max(raw * 0.25, raw - TUNING.followUp * (ctx.queued[n] || 0)) + 1;
     // Who goes: the strongest four, but keep the best unit home when another enemy is next door.
     let group = fighters.slice(0, MAX_MARCH);
     if (threatTo(state, house, pr.id, n) > 0 && fighters.length > 1) group = fighters.slice(1, MAX_MARCH + 1);
@@ -244,7 +265,7 @@ function chooseAttack(state, house, pr, vs, units, ctx, rng) {
     const ratio = power / def;
     const vsLeader = t.owner && t.owner === ctx.leader && house !== ctx.leader;
     const need = (t.owner ? TUNING.attackRatio : TUNING.freeholdRatio) + (isSeaLane(pr.id, n) ? TUNING.seaLaneExtra : 0) -
-      (vsLeader ? TUNING.coalition : 0);
+      (vsLeader ? TUNING.coalition : 0) - (closing ? TUNING.closingBonus : 0) - (finishing ? TUNING.closingBonus : 0);
     if (ratio < need) continue;
     let score = ratio;
     if (!t.owner && ctx.early) score += 0.6;
@@ -304,6 +325,13 @@ function planDiplomacy(state, house, pr, rng) {
   const caps = captivesOf(state, house);
   if (caps.length && pr.vassals.length < MAX_VASSALS_PER_PROVINCE && rng.chance(0.6)) {
     return { province: pr.id, type: 'recruit', captive: caps[0].id };
+  }
+  // Invite a wanderer standing here or next door.
+  if (pr.vassals.length < MAX_VASSALS_PER_PROVINCE && pr.gold >= 120 && rng.chance(0.5)) {
+    const near = new Set([pr.id, ...ADJACENCY[pr.id]]);
+    const w = Object.values(state.vassals).filter(v => v.status === 'wandering' && near.has(v.location))
+      .sort((a, b) => (b.might + b.wits + b.charm) - (a.might + a.wits + a.charm) || (a.id < b.id ? -1 : 1))[0];
+    if (w) return { province: pr.id, type: 'diplomacy', kind: 'wanderer', vassal: w.id };
   }
   const mine = housePower(state, house);
   const threat = biggestThreat(state, house);

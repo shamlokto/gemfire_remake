@@ -9,6 +9,8 @@
 //  - assign  {province, unit, vassal|null}        FREE action (does not use the month's order)
 //  - march   {from, to, units:[uid] (<=4), vassals:[vid], fifth:'company'|'spirit'|null, food}
 //  - disband {province, unit}
+//  - study   {province, branch?|tech?}             research points into a tech (default: focus)
+//  - diplomacy kind 'wanderer' {vassal}            invite a wanderer standing in or next to here
 // Leaders of the chosen units always march with them. A march to a foreign province is queued in
 // state.marches (resolved in turn.js at month end); its units and vassals leave the province now.
 // Attacks need at least one vassal. Transfers between own provinces need no vassal.
@@ -27,6 +29,9 @@ import {
   unitName,
 } from './state.js';
 import { doDiplomacy, DIPLOMACY } from './diplomacy.js';
+import { techEffect, hasTech, studyPoints, addResearch, techState, nextInBranch, shardStatus } from './tech.js';
+import { companyDiscount } from './economy.js';
+import { TECH_BY_ID, BRANCHES } from '../data/tech.js';
 
 export const DEVELOP_COST = 30;
 export const SPY_COST = 20;
@@ -37,14 +42,31 @@ export const NEW_UNIT_TRAINING = 20;
 export const ORDER_LABELS = {
   develop: 'Develop', muster: 'Muster', train: 'Train', hire: 'Hire company', dismiss: 'Dismiss company',
   march: 'March', supply: 'Send supplies', govern: 'Govern', diplomacy: 'Diplomacy', spy: 'Spy',
-  recruit: 'Recruit captive', disband: 'Disband unit', rest: 'Rest',
+  recruit: 'Recruit captive', disband: 'Disband unit', study: 'Study', rest: 'Rest',
 };
 
 const clamp = (x, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
-export const musterCost = (troop, soldiers) => Math.ceil(soldiers / 10) * TROOPS[troop].cost;
+// Muster cost; `state`/`house` optional (Siegecraft makes engines cheaper).
+export const musterCost = (troop, soldiers, state = null, house = null) =>
+  Math.ceil(soldiers / 10) * Math.max(1, Math.round(TROOPS[troop].cost * (troop === 'siege' ? 1 + techEffect(state, house, 'siegeCost') : 1)));
 export const developGain = gov => Math.round(4 + (gov ? gov.wits / 20 : -2));
-// Drill gain for a unit: its leader's Might helps; leaderless units drill slower.
-export const trainGain = leader => Math.round(leader ? 10 + leader.might / 10 : 8);
+// Drill gain for a unit: its leader's Might helps; leaderless units drill slower. `bonus` from Drill Yards.
+export const trainGain = (leader, bonus = 0) => Math.round((leader ? 10 + leader.might / 10 : 8) + bonus);
+// Hire price of a company for a house (Guild Charters, Beast-Taming).
+export function hireCost(state, house, type) {
+  return Math.round(COMPANIES[type].hire * (1 + techEffect(state, house, 'hire')) * companyDiscount(state, house, type));
+}
+// Every company with its price and why it cannot be hired here (null if it can).
+export function hireOptions(state, pid) {
+  const pr = state.provinces[pid];
+  return Object.entries(COMPANIES).map(([type, c]) => {
+    const cost = hireCost(state, pr.owner, type);
+    const locked = c.requires && !hasTech(state, pr.owner, c.requires);
+    return { type, name: c.name, cost, wage: Math.round(c.wage * companyDiscount(state, pr.owner, type)), size: c.size,
+      locked: !!locked, disabled: locked ? `Needs ${TECH_BY_ID[c.requires].name}.` : pr.company ? 'A company is already here.' :
+        pr.gold < cost ? `Needs ${cost} gold.` : null };
+  });
+}
 export const recruitChance = (envoy, captive) =>
   Math.max(0.05, Math.min(0.9, envoy.charm / 150 + (100 - captive.loyalty) / 250));
 
@@ -69,7 +91,7 @@ export function listOrders(state, pid) {
   add('govern', FEAST_FOOD, done);
   add('muster', cheapestTroop, done || (!canRaise && !canAdd ? 'No room for more soldiers.' : pr.gold < cheapestTroop ? 'No gold.' : null));
   add('train', 0, done || (!pr.units.length ? 'No units to drill.' : null));
-  const cheapest = Math.min(...Object.values(COMPANIES).map(c => c.hire));
+  const cheapest = Math.min(...hireOptions(state, pid).filter(o => !o.locked).map(o => o.cost));
   add('hire', cheapest, done || (pr.company ? 'A company is already here.' : pr.gold < cheapest ? `Needs ${cheapest} gold.` : null));
   if (pr.company) add('dismiss', 0, done);
   const mo = marchOptions(state, pid);
@@ -80,6 +102,7 @@ export function listOrders(state, pid) {
   add('spy', SPY_COST, done || noV || (pr.gold < SPY_COST ? `Needs ${SPY_COST} gold.` : null));
   add('recruit', 0, done || noV || (!captivesOf(state, house).length ? 'No captives.' : null));
   if (pr.units.length) add('disband', 0, done);
+  add('study', 0, done);
   add('rest', 0, done);
   return out;
 }
@@ -105,13 +128,17 @@ export function marchOptions(state, pid) {
   if (pr.company) fifth.push({ kind: 'company', type: pr.company.type, name: COMPANIES[pr.company.type].name, soldiers: pr.company.soldiers });
   const sp = house ? availableSpirit(state, house) : null;
   if (sp && vassals.length) fifth.push({ kind: 'spirit', id: sp, name: sp, soldiers: SPIRIT_UNIT[sp].soldiers });
+  // Every shard the house holds, with its charge (the UI shows why a spirit cannot come).
+  const queued = new Set(state.marches.filter(m => m.house === house && m.fifth?.kind === 'spirit').map(m => m.fifth.id));
+  const spirits = house ? shardStatus(state, house).map(x => ({ ...x,
+    reason: queued.has(x.id) ? 'Already marching in another attack.' : !vassals.length && x.ready ? 'Needs a vassal to call it.' : x.reason })) : [];
   const attack = house ? adjacentForeign(state, pid).filter(t => {
     const o = state.provinces[t].owner;
     return !(o && atPeace(state, house, o));
   }) : [];
   const transfer = house ? adjacentOwn(state, pid) : [];
   const seaLanes = [...attack, ...transfer].filter(t => isSeaLane(pid, t));
-  return { units, vassals, fifth, targets: { attack, transfer, seaLanes }, maxUnits: MAX_MARCH, needsVassalToAttack: true };
+  return { units, vassals, fifth, spirits, targets: { attack, transfer, seaLanes }, maxUnits: MAX_MARCH, needsVassalToAttack: true };
 }
 
 // Everything the muster dialog needs.
@@ -121,7 +148,7 @@ export function marchOptions(state, pid) {
 export function musterOptions(state, pid) {
   const pr = state.provinces[pid];
   return {
-    types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: TROOPS[t].cost })),
+    types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: musterCost(t, 10, state, pr.owner) })),
     units: pr.units.filter(u => u.soldiers < MAX_SOLDIERS)
       .map(u => ({ uid: u.uid, type: u.type, name: unitName(u), soldiers: u.soldiers, room: MAX_SOLDIERS - u.soldiers })),
     canRaise: pr.units.length < MAX_UNITS_PER_PROVINCE,
@@ -184,7 +211,8 @@ const HANDLERS = {
     if (pr[kind] >= 100) return fail(`The ${kind} are fully developed.`);
     if (pr.gold < DEVELOP_COST) return fail(`Needs ${DEVELOP_COST} gold.`);
     pr.gold -= DEVELOP_COST;
-    const g = developGain(governorOf(state, pr.id));
+    const g = developGain(governorOf(state, pr.id)) +
+      (kind === 'fields' ? techEffect(state, house, 'fieldsGain') : kind === 'market' ? techEffect(state, house, 'marketGain') : 0);
     pr[kind] = clamp(pr[kind] + g);
     return { ok: true, msg: `${kind[0].toUpperCase() + kind.slice(1)} +${g} (now ${pr[kind]}).` };
   },
@@ -213,10 +241,11 @@ const HANDLERS = {
     if (!u && pr.units.length >= MAX_UNITS_PER_PROVINCE) return fail(`At most ${MAX_UNITS_PER_PROVINCE} units in a province.`);
     const have = u ? u.soldiers : 0;
     let n = Math.floor(Math.min(o.soldiers | 0, MAX_SOLDIERS - have) / 10) * 10;
-    const affordable = Math.floor(pr.gold / TROOPS[type].cost) * 10;
+    const per10 = musterCost(type, 10, state, house);
+    const affordable = Math.floor(pr.gold / per10) * 10;
     n = Math.min(n, affordable);
     if (n <= 0) return fail(have >= MAX_SOLDIERS ? 'This unit is at full strength.' : 'Not enough gold.');
-    const cost = musterCost(type, n);
+    const cost = musterCost(type, n, state, house);
     pr.gold -= cost;
     if (u) {
       u.training = Math.round((u.training * u.soldiers + NEW_UNIT_TRAINING * n) / (u.soldiers + n));
@@ -234,7 +263,7 @@ const HANDLERS = {
     if (!targets.length) return fail(o.unit ? 'That unit is not here.' : 'No units to drill.');
     let best = 0;
     for (const u of targets) {
-      const g = trainGain(leaderOf(state, u));
+      const g = trainGain(leaderOf(state, u), techEffect(state, house, 'trainGain'));
       u.training = clamp(u.training + g);
       best = Math.max(best, u.training);
     }
@@ -252,11 +281,15 @@ const HANDLERS = {
   hire(state, pr, house, o) {
     const c = COMPANIES[o.company];
     if (!c) return fail('Unknown company.');
+    if (c.requires && !hasTech(state, house, c.requires)) return fail(`The ${c.name} need ${TECH_BY_ID[c.requires].name}.`);
     if (pr.company) return fail('A company is already here.');
-    if (pr.gold < c.hire) return fail(`Needs ${c.hire} gold.`);
-    pr.gold -= c.hire;
+    const cost = hireCost(state, house, o.company);
+    if (pr.gold < cost) return fail(`Needs ${cost} gold.`);
+    pr.gold -= cost;
     pr.company = { type: o.company, soldiers: c.size };
-    return { ok: true, msg: `The ${c.name} sign on (${c.wage} gold a month).` };
+    if (c.loyaltyHit) pr.loyalty = clamp(pr.loyalty - c.loyaltyHit);
+    const wage = Math.round(c.wage * companyDiscount(state, house, o.company));
+    return { ok: true, msg: `The ${c.name} sign on (${wage ? wage + ' gold a month' : 'no wages'}).` };
   },
 
   dismiss(state, pr) {
@@ -320,6 +353,18 @@ const HANDLERS = {
     return { ok: true, msg: `${describeMove(units.length, marchers.length)} march on ${provinceName(to.id)}${isSeaLane(pr.id, to.id) ? ' by sea' : ''}.` };
   },
 
+  study(state, pr, house, o, vs) {
+    const best = vs.reduce((a, v) => Math.max(a, v.wits), 0);
+    const pts = vs.length ? studyPoints(best) : 6;
+    let target = o.tech && TECH_BY_ID[o.tech] ? o.tech : null;
+    if (!target && o.branch && BRANCHES[o.branch]) target = nextInBranch(state, house, o.branch)?.id || null;
+    if (o.branch && !target && !o.tech) return fail(`Nothing left to learn in ${BRANCHES[o.branch].name}.`);
+    const done = addResearch(state, house, pts, target);
+    const t = techState(state, house);
+    const what = done ? `${TECH_BY_ID[done].name} is mastered!` : `${pts} research points${target ? ' into ' + TECH_BY_ID[target].name : t.focus ? ' into ' + TECH_BY_ID[t.focus].name : ''}.`;
+    return { ok: true, msg: `Scholars study: ${what}`, points: pts, completed: done };
+  },
+
   supply(state, pr, house, o) {
     const to = state.provinces[o.to];
     if (!to || to.owner !== house || !isAdjacent(pr.id, to.id)) return fail('Send supplies to a neighbouring province of yours.');
@@ -334,7 +379,7 @@ const HANDLERS = {
     if (!DIPLOMACY[o.kind]) return fail('Unknown diplomacy.');
     const envoy = o.envoy ? state.vassals[o.envoy] : envoyOf(state, pr.id);
     if (!envoy || envoy.location !== pr.id || envoy.house !== house) return fail('That envoy is not here.');
-    const target = o.kind === 'bribe' ? state.vassals[o.vassal]?.house : o.target;
+    const target = o.kind === 'bribe' ? state.vassals[o.vassal]?.house : o.kind === 'wanderer' ? null : o.target;
     return withRng(state, rng => doDiplomacy(state, rng, o.kind, { province: pr, house, envoy, target, vassal: o.vassal }));
   },
 

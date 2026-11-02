@@ -44,12 +44,17 @@ export const SLOTS = [
   ...S(229, 230, 'ui', 1024, 1024, 'cutout'),
   // Vignettes for the four island provinces added with the 28-province map
   ...S(231, 234, 'vignette', 800, 450, 'cover'),
+  // Wanderers (235-264) and heirs (265-270), added with the content update
+  ...S(235, 270, 'portrait', 512, 640, 'cover'),
+  // Clash cut-ins for the companies added with the tech tree
+  ...S(271, 278, 'cutin', 1600, 700, 'cover'),
 ];
 
 // Battle set lookups.
 export const CLASH_CUTIN = { footmen: 201, pikes: 202, archers: 203, horse: 204, knights: 205,
   siege: 206, wolfriders: 207, golem: 208, wyvern: 209, ghosts: 210, bandits: 211, druids: 212,
-  militia: 213 };
+  militia: 213, sellswords: 271, trolls: 272, harpies: 273, lizardfolk: 274, skeletons: 275,
+  giants: 276, arquebusiers: 277, bombard: 278 };
 export const SPIRIT_CUTIN = { ember: 214, tide: 215, gale: 216, stone: 217, dusk: 218 };
 export const BATTLE_MOMENT = { gateBreach: 219, ladders: 220, rout: 221, keepTaken: 222,
   lastStand: 223, duel: 224, intro: 225 };

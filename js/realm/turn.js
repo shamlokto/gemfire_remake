@@ -15,12 +15,13 @@
 import { STORY } from '../data/events.js';
 import { HOUSES } from '../data/houses.js';
 import { SPIRIT_IDS, SPIRIT_UNIT } from '../data/spirits.js';
-import { ADJACENCY, PROVINCES } from '../data/world.js';
-import { MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../data/units.js';
+import { ADJACENCY, PROVINCES, isSeaLane } from '../data/world.js';
+import { MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, COMPANIES } from '../data/units.js';
+import { techEffect, spendCharge, setCharge, chargeTick, researchTick } from './tech.js';
 import {
   withRng, seasonIndex, season, provinceVassals, ownedProvinces, houseVassals, shardsOf, addLog,
   houseName, provinceName, vassalName, emptyMilitia, isPlayerControlled, aliveHouses,
-  VICTORY_PROVINCES, fieldedUnits, availableSpirit,
+  VICTORY_PROVINCES, fieldedUnits, availableSpirit, wanderersAt,
 } from './state.js';
 
 // A vassal on the losing side with no surviving unit is captured with this chance.
@@ -28,7 +29,7 @@ export const UNITLESS_CAPTURE = 0.4;
 import { applyOrder, resetOrders, moveVassal } from './orders.js';
 import { monthlyTick } from './economy.js';
 import { planHouseOrders } from './ai.js';
-import { defect } from './diplomacy.js';
+import { defect, joinHouse } from './diplomacy.js';
 
 let autoModule = null;
 async function defaultAuto() {
@@ -37,31 +38,49 @@ async function defaultAuto() {
 }
 
 // ---------- battle input ----------
-const troopIn = (state, u) => {
+// Tech and terrain modifiers become per-unit atkBonus/defBonus multipliers (js/battle/rules.js).
+const round2 = x => Math.round(x * 100) / 100;
+function troopIn(state, u, mods) {
   const l = u.leader ? state.vassals[u.leader] : null;
-  return { id: u.uid, kind: 'troop', type: u.type, soldiers: u.soldiers, training: u.training,
+  let atk = mods.atk, def = mods.def;
+  if (u.type === 'siege') atk *= 1 + techEffect(state, mods.house, 'siegeAtk');
+  const r = { id: u.uid, kind: 'troop', type: u.type, soldiers: u.soldiers, training: u.training,
     leader: l ? l.id : null, might: l ? l.might : 0, wits: l ? l.wits : 0 };
-};
-const companyIn = (c, id) => ({ id, kind: 'company', type: c.type, soldiers: c.soldiers, training: 60, leader: null, might: 0, wits: 0 });
-// A summoned spirit: its spell draws on the best Wits among the vassals present.
-const spiritIn = (spiritId, id, vassals) => ({
-  id, kind: 'spirit', type: spiritId, soldiers: SPIRIT_UNIT[spiritId].soldiers, training: 100, leader: null,
-  might: 40, wits: vassals.reduce((a, v) => Math.max(a, v.wits), 0),
-});
+  if (atk !== 1) r.atkBonus = round2(atk);
+  if (def !== 1) r.defBonus = round2(def);
+  return r;
+}
+function companyIn(c, id, terrain) {
+  const r = { id, kind: 'company', type: c.type, soldiers: c.soldiers, training: 60, leader: null, might: 0, wits: 0 };
+  const tb = COMPANIES[c.type]?.terrainBonus?.[terrain];
+  if (tb) r.atkBonus = tb;
+  return r;
+}
+// A summoned spirit: its spell draws on the best Wits among the vassals present. Lantern Lore
+// raises its essence; the enemy's Warding lowers it.
+function spiritIn(state, house, enemy, spiritId, id, vassals) {
+  const ess = SPIRIT_UNIT[spiritId].soldiers * (1 + techEffect(state, house, 'spiritEssence')) * (1 - techEffect(state, enemy, 'ward'));
+  return { id, kind: 'spirit', type: spiritId, soldiers: Math.max(1, Math.round(ess)), training: 100, leader: null,
+    might: 40, wits: vassals.reduce((a, v) => Math.max(a, v.wits), 0) };
+}
 
 export function buildBattleInput(state, march) {
   const pr = state.provinces[march.to];
+  const terrain = PROVINCES[pr.id].terrain;
+  const aH = march.house, dH = pr.owner;
+  const atkMods = { house: aH, atk: (1 + techEffect(state, aH, 'troopAtk')) * (isSeaLane(march.from, march.to) ? 1 + techEffect(state, aH, 'seaAttack') : 1), def: 1 };
+  const defMods = { house: dH, atk: 1 + techEffect(state, dH, 'troopAtk'), def: 1 + techEffect(state, dH, 'homeDef') };
   const atkVassals = march.vassals.map(id => state.vassals[id]).filter(v => v && v.status === 'active');
-  const atk = march.units.filter(u => u.soldiers > 0).map(u => troopIn(state, u));
-  if (march.fifth?.kind === 'company' && march.fifth.soldiers > 0) atk.push(companyIn(march.fifth, 'company:a'));
-  else if (march.fifth?.kind === 'spirit' && atkVassals.length) atk.push(spiritIn(march.fifth.id, 'spirit:a', atkVassals));
+  const atk = march.units.filter(u => u.soldiers > 0).map(u => troopIn(state, u, atkMods));
+  if (march.fifth?.kind === 'company' && march.fifth.soldiers > 0) atk.push(companyIn(march.fifth, 'company:a', terrain));
+  else if (march.fifth?.kind === 'spirit' && atkVassals.length) atk.push(spiritIn(state, aH, dH, march.fifth.id, 'spirit:a', atkVassals));
 
   const defVassals = provinceVassals(state, pr.id);
-  const def = fieldedUnits(state, pr.id).map(u => troopIn(state, u));
-  if (pr.company && pr.company.soldiers > 0) def.push(companyIn(pr.company, 'company:d'));
+  const def = fieldedUnits(state, pr.id).map(u => troopIn(state, u, defMods));
+  if (pr.company && pr.company.soldiers > 0) def.push(companyIn(pr.company, 'company:d', terrain));
   else if (pr.owner && defVassals.length) {
     const sp = availableSpirit(state, pr.owner);
-    if (sp) def.push(spiritIn(sp, 'spirit:d', defVassals));
+    if (sp) def.push(spiritIn(state, dH, aH, sp, 'spirit:d', defVassals));
   }
   if (!pr.owner) {
     pr.militia.forEach((n, i) => { if (n > 0) def.push({ id: 'militia:' + i, kind: 'militia', type: 'militia', soldiers: n, training: 30, leader: null, might: 0, wits: 0 }); });
@@ -168,11 +187,11 @@ export function applyBattleResult(state, march, input, result) {
   const pr = state.provinces[march.to];
   const defHouse = pr.owner;
   const atkHouse = march.house;
-  const si = seasonIndex(state);
   const spiritOf = side => side.units.find(u => u.kind === 'spirit');
   const as = spiritOf(input.attacker), ds = spiritOf(input.defender);
-  if (as) state.houses[atkHouse].spiritUsed[as.type] = si;
-  if (ds && defHouse) state.houses[defHouse].spiritUsed[ds.type] = si;
+  // A summon spends the shard's whole charge, win or lose.
+  if (as) spendCharge(state, atkHouse, as.type);
+  if (ds && defHouse) spendCharge(state, defHouse, ds.type);
 
   const after = (side, id) => side.units.find(u => u.id === id);
   const left = r => Math.max(0, Math.round(r.soldiers));
@@ -219,7 +238,12 @@ export function applyBattleResult(state, march, input, result) {
       if (atkCompany) pr.company = atkCompany;
       state.intel[atkHouse][pr.id] = state.turn;
       addLog(state, `${houseName(atkHouse)} takes ${where}${defHouse ? ' from ' + houseName(defHouse) : ''}.`, 'battle', defHouse ? STORY.siege.art : undefined);
-      if (pr.shard) addLog(state, `The ${pr.shard} shard of ${where} passes to ${houseName(atkHouse)}.`, 'story');
+      if (pr.shard) {
+        addLog(state, `The ${pr.shard} shard of ${where} passes to ${houseName(atkHouse)}.`, 'story');
+        setCharge(state, atkHouse, pr.shard, 0);          // a captured shard starts empty
+        if (defHouse && state.houses[defHouse]?.charge) delete state.houses[defHouse].charge[pr.shard];
+      }
+      offerWanderers(state, rng, pr.id, atkHouse);
       if (defHouse) {
         loyaltyShock(state, rng, defHouse, atkHouse);
         if (!ownedProvinces(state, defHouse).length) eliminate(state, defHouse, atkHouse);
@@ -243,6 +267,34 @@ export function applyBattleResult(state, march, input, result) {
       if (defHouse) loyaltyShock(state, rng, atkHouse, defHouse);
     }
   });
+}
+
+// Wanderers in a conquered province may offer their swords to the conqueror.
+export const WANDERER_OFFER = 0.4;
+function offerWanderers(state, rng, pid, house) {
+  for (const w of wanderersAt(state, pid)) {
+    const ruler = state.vassals[state.houses[house].ruler];
+    const p = WANDERER_OFFER + (ruler ? ruler.charm / 300 : 0);
+    if (rng.chance(p)) joinHouse(state, w.id, house, pid);
+  }
+}
+
+// Heirs come of age; wanderers drift each new year.
+function characterTick(state, rng) {
+  for (const v of Object.values(state.vassals)) {
+    if (v.status === 'future' && state.turn >= v.dueTurn) {
+      const h = state.houses[v.house];
+      const home = h?.alive ? [h.capital, ...ownedProvinces(state, v.house).map(p => p.id)]
+        .find(pid => state.provinces[pid].owner === v.house && state.provinces[pid].vassals.length < MAX_VASSALS_PER_PROVINCE) : null;
+      if (home != null) joinHouse(state, v.id, v.house, home);
+      else if (!h?.alive) {
+        v.house = null; v.status = 'wandering'; v.location = h ? h.capital : 0; delete v.dueTurn;
+        addLog(state, `${vassalName(v.id)} comes of age with no house left to serve, and takes to the roads.`, 'story');
+      }
+    } else if (v.status === 'wandering' && state.month === 0 && rng.chance(0.3)) {
+      v.location = rng.pick(ADJACENCY[v.location]);
+    }
+  }
 }
 
 // Losing a battle shakes the loser's vassals; disloyal ones may change sides.
@@ -290,8 +342,11 @@ export async function endMonth(state, opts = {}) {
   for (const m of state.marches) returnHome(state, m);
   state.marches = [];
 
-  // 3. Economy
+  // 3. Economy, research, shard charge, characters
   withRng(state, rng => monthlyTick(state, rng));
+  researchTick(state);
+  chargeTick(state);
+  withRng(state, rng => characterTick(state, rng));
 
   // 4. Victory
   checkVictory(state);

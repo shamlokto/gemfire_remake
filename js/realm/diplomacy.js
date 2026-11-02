@@ -5,9 +5,11 @@
 
 import { MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../data/units.js';
 import { STORY } from '../data/events.js';
+import { VASSAL_BY_ID } from '../data/vassals.js';
+import { ADJACENCY } from '../data/world.js';
 import {
   housePower, ownedProvinces, pairKey, atPeace, addLog, houseName, vassalName, isRuler,
-  provinceName, isPlayerControlled, houseTotals,
+  provinceName, isPlayerControlled, houseTotals, newUid, START_TRAINING,
 } from './state.js';
 
 export const DIPLOMACY = {
@@ -15,6 +17,7 @@ export const DIPLOMACY = {
   tribute:  { label: 'Demand tribute',    cost: 0 },
   marriage: { label: 'Propose marriage',  cost: 150, months: 36 },
   bribe:    { label: 'Bribe a vassal',    cost: null },   // cost depends on the vassal
+  wanderer: { label: 'Invite a wanderer', cost: 60 },     // a wanderer in or next to the province
 };
 
 export const bribeCost = v => 100 + v.might + v.wits;
@@ -41,6 +44,11 @@ export function bribeChance(state, envoy, v) {
   return clamp01(((100 - v.loyalty) / 100) * (0.4 + envoy.charm / 120) - 0.05);
 }
 
+export function wandererChance(state, house, envoy, w) {
+  const provinces = ownedProvinces(state, house).length;
+  return clamp01(0.3 + envoy.charm / 220 - Math.max(0, provinces - 10) * 0.02 + (100 - w.loyalty) / 400);
+}
+
 function spend(pr, cost) {
   if (pr.gold < cost) return false;
   pr.gold -= cost; return true;
@@ -49,6 +57,19 @@ function spend(pr, cost) {
 export function doDiplomacy(state, rng, kind, ctx) {
   const { province: pr, house, envoy, target } = ctx;
   if (!envoy) return { ok: false, msg: 'An envoy (vassal) is needed in this province.' };
+  if (kind === 'wanderer') {
+    const w = state.vassals[ctx.vassal];
+    if (!w || w.status !== 'wandering') return { ok: false, msg: 'Choose a wanderer.' };
+    if (w.location !== pr.id && !ADJACENCY[pr.id].includes(w.location)) return { ok: false, msg: `${vassalName(w.id)} is too far away.` };
+    if (pr.vassals.length >= MAX_VASSALS_PER_PROVINCE) return { ok: false, msg: 'No room in this province.' };
+    if (!spend(pr, DIPLOMACY.wanderer.cost)) return { ok: false, msg: `Not enough gold for gifts (${DIPLOMACY.wanderer.cost}).` };
+    if (rng.chance(wandererChance(state, house, envoy, w))) {
+      joinHouse(state, w.id, house, pr.id);
+      return { ok: true, success: true, msg: `${vassalName(w.id)} accepts your invitation.` };
+    }
+    w.loyalty = Math.max(20, w.loyalty - 8);   // each refusal makes the next offer likelier
+    return { ok: true, success: false, msg: `${vassalName(w.id)} declines, for now.` };
+  }
   if (kind !== 'bribe' && (!target || target === house || !state.houses[target]?.alive)) {
     return { ok: false, msg: 'Choose a living house.' };
   }
@@ -161,3 +182,24 @@ export function biggestThreat(state, house) {
   }
   return best;
 }
+
+// A wanderer (or an heir) joins a house in province pid, bringing a band if there is room.
+export function joinHouse(state, vid, house, pid) {
+  const v = state.vassals[vid];
+  const pr = state.provinces[pid];
+  if (!pr || pr.owner !== house || pr.vassals.length >= MAX_VASSALS_PER_PROVINCE) return false;
+  v.house = house; v.status = 'active'; v.captor = null; v.location = pid; v.marching = false;
+  if (v.loyalty < 50) v.loyalty = 50;
+  pr.vassals.push(vid);
+  if (v.troop && v.band && pr.units.length < MAX_UNITS_PER_PROVINCE) {
+    pr.units.push({ uid: newUid(state), type: v.troop, soldiers: v.band, training: START_TRAINING, leader: vid });
+  }
+  delete v.troop; delete v.band; delete v.dueTurn;
+  const name = vassalName(vid);
+  addLog(state, `${name} joins ${houseName(house)} at ${provinceName(pid)}.`, 'info');
+  if (isPlayerControlled(state, house)) {
+    state.pendingEvents.push({ title: 'A new sword', text: `${name}, ${VASSAL_BY_ID[vid]?.title || 'wanderer'}, swears service to your house at ${provinceName(pid)}.` });
+  }
+  return true;
+}
+

@@ -41,7 +41,7 @@ export const HOUSE_BY_ID = Object.fromEntries(HOUSES.map(h => [h.id, h]));
 export const HOUSE_START = {
   aldmere:   { fields: 45, market: 40, food: 300, gold: 220, loyalty: 75 },
   corvane:   { fields: 35, market: 25, food: 180, gold: 110, loyalty: 60 },
-  isolde:    { fields: 30, market: 50, food: 150, gold: 220, loyalty: 60 },
+  isolde:    { fields: 30, market: 45, food: 150, gold: 170, loyalty: 60 },
   hrothgar:  { fields: 25, market: 20, food: 160, gold: 90,  loyalty: 70 },
   seraphine: { fields: 35, market: 30, food: 180, gold: 120, loyalty: 80 },
   vey:       { fields: 35, market: 25, food: 170, gold: 100, loyalty: 70 },

@@ -27,6 +27,14 @@ import { HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
 import { SPIRITS } from '../data/spirits.js';
 import { PROVINCES } from '../data/world.js';
+import { palette, squadSize, formation, attackAct, MOUNTED, POWDER, launchPoint } from './battle-anim/figures.js';
+import { blitFigure } from './battle-anim/figcache.js';
+import { drawSpirit } from './battle-anim/spirit-art.js';
+import { Particles, reducedMotion, blob } from './battle-anim/fx.js';
+import { ClashScene } from './battle-anim/choreo.js';
+import { ClashRenderer } from './battle-anim/clashfx.js';
+import { drawInfoCard } from './battle-anim/infocard.js';
+import { SpellAnim } from './battle-anim/spells.js';
 
 const NEUTRAL = { name: 'Free Hold', short: 'Free Hold', color: '#8a8070', accent: '#e0d6c0' };
 const PREF_KEY = 'lf.battle.prefs';
@@ -196,135 +204,6 @@ function drawTerrainCell(g, t, x, y, cs, gx, gy, season) {
   if (season === 2) { g.fillStyle = 'rgba(200,120,30,0.08)'; g.fillRect(x, y, cs + 0.5, cs + 0.5); }
 }
 
-// One soldier figure (or engine / beast), centre-bottom at (x, y), height s, facing 1/-1.
-function drawFigure(g, type, x, y, s, col, acc, facing, t, ghostly = false) {
-  g.save();
-  g.translate(x, y); g.scale(facing, 1);
-  if (ghostly || type === 'ghosts') g.globalAlpha *= 0.72;
-  const skin = '#e6c39a', steel = '#c9ccd2', dark = '#2a2228', wood = '#6b4a2b';
-  const lw = Math.max(1, s / 14);
-  g.lineCap = 'round'; g.lineJoin = 'round';
-  const stride = Math.sin(t * 6) * s * 0.03;
-  const person = (bx, by, sc, weapon) => {
-    // legs
-    g.strokeStyle = dark; g.lineWidth = lw * sc;
-    g.beginPath(); g.moveTo(bx - s * 0.06 * sc, by); g.lineTo(bx - s * 0.04 * sc + stride, by - s * 0.28 * sc);
-    g.moveTo(bx + s * 0.06 * sc, by); g.lineTo(bx + s * 0.04 * sc - stride, by - s * 0.28 * sc); g.stroke();
-    // body
-    g.fillStyle = col; g.strokeStyle = dark; g.lineWidth = lw * 0.6 * sc;
-    g.beginPath(); g.moveTo(bx - s * 0.13 * sc, by - s * 0.26 * sc); g.lineTo(bx - s * 0.1 * sc, by - s * 0.62 * sc);
-    g.lineTo(bx + s * 0.1 * sc, by - s * 0.62 * sc); g.lineTo(bx + s * 0.13 * sc, by - s * 0.26 * sc); g.closePath(); g.fill(); g.stroke();
-    g.fillStyle = acc; g.fillRect(bx - s * 0.12 * sc, by - s * 0.34 * sc, s * 0.24 * sc, s * 0.05 * sc);
-    // head + helmet
-    g.fillStyle = skin; g.beginPath(); g.arc(bx, by - s * 0.73 * sc, s * 0.1 * sc, 0, 7); g.fill();
-    g.fillStyle = weapon === 'hood' ? shade(col, -0.35) : steel;
-    g.beginPath(); g.arc(bx, by - s * 0.76 * sc, s * 0.105 * sc, Math.PI, 0); g.fill();
-    weaponOf(bx, by, sc, weapon);
-  };
-  const weaponOf = (bx, by, sc, w) => {
-    g.lineWidth = lw * sc;
-    if (w === 'sword') {
-      g.strokeStyle = steel; g.beginPath(); g.moveTo(bx + s * 0.14 * sc, by - s * 0.45 * sc); g.lineTo(bx + s * 0.34 * sc, by - s * 0.78 * sc); g.stroke();
-      g.fillStyle = shade(col, -0.2); g.strokeStyle = acc; g.lineWidth = lw * 0.6 * sc;
-      g.beginPath(); g.ellipse(bx - s * 0.13 * sc, by - s * 0.45 * sc, s * 0.09 * sc, s * 0.14 * sc, 0, 0, 7); g.fill(); g.stroke();
-    } else if (w === 'pike') {
-      g.strokeStyle = wood; g.beginPath(); g.moveTo(bx - s * 0.1 * sc, by - s * 0.2 * sc); g.lineTo(bx + s * 0.55 * sc, by - s * 1.05 * sc); g.stroke();
-      g.fillStyle = steel; g.beginPath(); g.moveTo(bx + s * 0.55 * sc, by - s * 1.05 * sc); g.lineTo(bx + s * 0.5 * sc, by - s * 0.93 * sc); g.lineTo(bx + s * 0.6 * sc, by - s * 0.95 * sc); g.fill();
-    } else if (w === 'bow') {
-      g.strokeStyle = wood; g.beginPath(); g.arc(bx + s * 0.16 * sc, by - s * 0.5 * sc, s * 0.22 * sc, -1.2, 1.2); g.stroke();
-      g.strokeStyle = 'rgba(240,240,220,0.8)'; g.lineWidth = lw * 0.4 * sc; g.beginPath(); g.moveTo(bx + s * 0.23 * sc, by - s * 0.7 * sc); g.lineTo(bx + s * 0.23 * sc, by - s * 0.3 * sc); g.stroke();
-    } else if (w === 'crossbow') {
-      g.strokeStyle = wood; g.beginPath(); g.moveTo(bx, by - s * 0.5 * sc); g.lineTo(bx + s * 0.3 * sc, by - s * 0.52 * sc); g.stroke();
-      g.strokeStyle = steel; g.beginPath(); g.moveTo(bx + s * 0.26 * sc, by - s * 0.62 * sc); g.lineTo(bx + s * 0.26 * sc, by - s * 0.42 * sc); g.stroke();
-    } else if (w === 'staff') {
-      g.strokeStyle = wood; g.beginPath(); g.moveTo(bx + s * 0.15 * sc, by); g.lineTo(bx + s * 0.18 * sc, by - s * 0.95 * sc); g.stroke();
-      g.fillStyle = '#9dff8a'; g.shadowColor = '#9dff8a'; g.shadowBlur = s * 0.2; g.beginPath(); g.arc(bx + s * 0.18 * sc, by - s * 0.98 * sc, s * 0.06 * sc, 0, 7); g.fill(); g.shadowBlur = 0;
-    } else if (w === 'fork') {
-      g.strokeStyle = wood; g.beginPath(); g.moveTo(bx + s * 0.05 * sc, by - s * 0.1 * sc); g.lineTo(bx + s * 0.3 * sc, by - s * 0.9 * sc); g.stroke();
-      g.strokeStyle = steel; g.lineWidth = lw * 0.5 * sc;
-      for (const d of [-0.05, 0, 0.05]) { g.beginPath(); g.moveTo(bx + s * (0.3 + d) * sc, by - s * 0.9 * sc); g.lineTo(bx + s * (0.32 + d) * sc, by - s * 1.02 * sc); g.stroke(); }
-    }
-  };
-  const beast = (bx, by, sc, body, barded, wolf = false) => {
-    const gait = Math.sin(t * 8) * s * 0.05 * sc;
-    g.strokeStyle = shade(body, -0.4); g.lineWidth = lw * sc;
-    for (const [lx, ph] of [[-0.28, 1], [-0.16, -1], [0.18, -1], [0.3, 1]]) {
-      g.beginPath(); g.moveTo(bx + s * lx * sc, by - s * 0.3 * sc); g.lineTo(bx + s * lx * sc + gait * ph, by); g.stroke();
-    }
-    g.fillStyle = body; g.beginPath(); g.ellipse(bx, by - s * 0.38 * sc, s * 0.36 * sc, s * 0.15 * sc, 0, 0, 7); g.fill();
-    // neck + head
-    g.beginPath(); g.moveTo(bx + s * 0.25 * sc, by - s * 0.45 * sc); g.lineTo(bx + s * 0.38 * sc, by - s * (wolf ? 0.55 : 0.7) * sc);
-    g.lineTo(bx + s * (wolf ? 0.56 : 0.52) * sc, by - s * (wolf ? 0.5 : 0.62) * sc); g.lineTo(bx + s * 0.34 * sc, by - s * 0.36 * sc); g.fill();
-    if (wolf) { g.beginPath(); g.moveTo(bx + s * 0.38 * sc, by - s * 0.56 * sc); g.lineTo(bx + s * 0.41 * sc, by - s * 0.66 * sc); g.lineTo(bx + s * 0.45 * sc, by - s * 0.55 * sc); g.fill(); }
-    // tail
-    g.strokeStyle = shade(body, -0.25); g.beginPath(); g.moveTo(bx - s * 0.35 * sc, by - s * 0.42 * sc); g.quadraticCurveTo(bx - s * 0.5 * sc, by - s * 0.35 * sc, bx - s * 0.46 * sc, by - s * 0.2 * sc); g.stroke();
-    if (barded) { g.fillStyle = col; g.beginPath(); g.ellipse(bx, by - s * 0.33 * sc, s * 0.34 * sc, s * 0.1 * sc, 0, 0, Math.PI); g.fill(); g.fillStyle = acc; g.fillRect(bx - s * 0.3 * sc, by - s * 0.34 * sc, s * 0.6 * sc, s * 0.03 * sc); }
-  };
-  switch (type) {
-    case 'footmen': person(0, 0, 1, 'sword'); break;
-    case 'pikes': person(0, 0, 1, 'pike'); break;
-    case 'archers': person(0, 0, 1, 'bow'); break;
-    case 'bandits': person(0, 0, 1, 'crossbow'); g.fillStyle = shade(col, -0.35); g.beginPath(); g.arc(0, -s * 0.76, s * 0.11, Math.PI * 0.9, Math.PI * 2.1); g.fill(); break;
-    case 'druids': {
-      g.fillStyle = '#3f6a35'; g.beginPath(); g.moveTo(-s * 0.15, 0); g.lineTo(-s * 0.09, -s * 0.62); g.lineTo(s * 0.09, -s * 0.62); g.lineTo(s * 0.15, 0); g.fill();
-      g.fillStyle = col; g.fillRect(-s * 0.1, -s * 0.36, s * 0.2, s * 0.05);
-      g.fillStyle = skin; g.beginPath(); g.arc(0, -s * 0.72, s * 0.09, 0, 7); g.fill();
-      g.fillStyle = '#2f5228'; g.beginPath(); g.arc(0, -s * 0.75, s * 0.11, Math.PI, 0); g.fill();
-      weaponOf(0, 0, 1, 'staff'); break;
-    }
-    case 'militia': person(0, 0, 0.95, 'fork'); break;
-    case 'horse': beast(0, 0, 1, '#7a5233', false); person(s * 0.02, -s * 0.36, 0.7, 'sword'); break;
-    case 'knights': beast(0, 0, 1, '#5d4a3c', true); person(s * 0.02, -s * 0.38, 0.72, 'pike'); break;
-    case 'wolfriders': beast(0, 0, 0.9, '#8d8f95', false, true); person(-s * 0.02, -s * 0.32, 0.65, 'sword'); break;
-    case 'ghosts': {
-      g.shadowColor = '#bfe6ff'; g.shadowBlur = s * 0.3;
-      beast(0, 0, 1, '#cfe8f5', false); person(s * 0.02, -s * 0.36, 0.7, 'sword'); g.shadowBlur = 0; break;
-    }
-    case 'siege': {
-      const sw = Math.sin(t * 1.5) * 0.15;
-      g.fillStyle = wood; g.fillRect(-s * 0.4, -s * 0.3, s * 0.8, s * 0.1);
-      g.strokeStyle = shade(wood, -0.3); g.lineWidth = lw * 1.2;
-      g.beginPath(); g.moveTo(-s * 0.2, -s * 0.3); g.lineTo(0, -s * 0.65); g.lineTo(s * 0.2, -s * 0.3); g.stroke();
-      g.save(); g.translate(0, -s * 0.6); g.rotate(-0.9 + sw); g.strokeStyle = wood; g.lineWidth = lw * 1.3;
-      g.beginPath(); g.moveTo(-s * 0.15, 0); g.lineTo(s * 0.55, 0); g.stroke();
-      g.fillStyle = '#555'; g.beginPath(); g.arc(s * 0.55, 0, s * 0.07, 0, 7); g.fill(); g.restore();
-      g.fillStyle = '#3a2a1a'; for (const wx of [-0.3, 0.3]) { g.beginPath(); g.arc(s * wx, -s * 0.12, s * 0.12, 0, 7); g.fill(); g.fillStyle = shade(wood, 0.2); g.beginPath(); g.arc(s * wx, -s * 0.12, s * 0.04, 0, 7); g.fill(); g.fillStyle = '#3a2a1a'; }
-      g.fillStyle = col; g.fillRect(-s * 0.38, -s * 0.32, s * 0.2, s * 0.06);
-      break;
-    }
-    case 'golem': {
-      const k = 1.5;
-      g.fillStyle = '#8b6b4a'; g.strokeStyle = '#4a3420'; g.lineWidth = lw;
-      g.fillRect(-s * 0.18 * k, -s * 0.3 * k, s * 0.12 * k, s * 0.3 * k); g.fillRect(s * 0.06 * k, -s * 0.3 * k, s * 0.12 * k, s * 0.3 * k);
-      g.beginPath(); g.roundRect(-s * 0.25 * k, -s * 0.72 * k, s * 0.5 * k, s * 0.44 * k, s * 0.06); g.fill(); g.stroke();
-      g.fillRect(-s * 0.36 * k, -s * 0.68 * k, s * 0.11 * k, s * 0.38 * k); g.fillRect(s * 0.25 * k, -s * 0.68 * k, s * 0.11 * k, s * 0.38 * k);
-      g.beginPath(); g.roundRect(-s * 0.12 * k, -s * 0.88 * k, s * 0.24 * k, s * 0.18 * k, s * 0.04); g.fill(); g.stroke();
-      g.fillStyle = '#ffcf6a'; g.shadowColor = '#ffb030'; g.shadowBlur = s * 0.25;
-      g.fillRect(-s * 0.07 * k, -s * 0.82 * k, s * 0.04 * k, s * 0.03 * k); g.fillRect(s * 0.03 * k, -s * 0.82 * k, s * 0.04 * k, s * 0.03 * k);
-      g.fillStyle = acc; g.fillRect(-s * 0.1 * k, -s * 0.55 * k, s * 0.2 * k, s * 0.05 * k); g.shadowBlur = 0;
-      break;
-    }
-    case 'wyvern': {
-      const flap = Math.sin(t * 7) * 0.5;
-      const k = 1.3;
-      g.translate(0, -s * 0.35 + Math.sin(t * 3) * s * 0.05);
-      g.fillStyle = '#3f6a4a';
-      for (const side of [1, -1]) {
-        g.save(); g.scale(1, side === 1 ? 1 : 0.6); g.rotate(-flap * side * 0.3);
-        g.beginPath(); g.moveTo(0, -s * 0.2 * k); g.lineTo(-s * 0.35 * k, -s * (0.7 + flap * 0.3) * k); g.lineTo(-s * 0.1 * k, -s * 0.35 * k); g.lineTo(s * 0.25 * k, -s * (0.65 + flap * 0.3) * k); g.closePath();
-        g.globalAlpha *= side === 1 ? 1 : 0.7; g.fill(); g.restore();
-      }
-      g.fillStyle = '#4f8a5a'; g.beginPath(); g.ellipse(0, -s * 0.15 * k, s * 0.3 * k, s * 0.11 * k, 0, 0, 7); g.fill();
-      g.beginPath(); g.moveTo(s * 0.2 * k, -s * 0.2 * k); g.quadraticCurveTo(s * 0.4 * k, -s * 0.45 * k, s * 0.5 * k, -s * 0.35 * k); g.lineTo(s * 0.32 * k, -s * 0.12 * k); g.fill();
-      g.strokeStyle = '#4f8a5a'; g.lineWidth = lw; g.beginPath(); g.moveTo(-s * 0.28 * k, -s * 0.15 * k); g.quadraticCurveTo(-s * 0.5 * k, -s * 0.05 * k, -s * 0.55 * k, -s * 0.2 * k); g.stroke();
-      g.fillStyle = col; g.fillRect(-s * 0.05 * k, -s * 0.28 * k, s * 0.12 * k, s * 0.05 * k);
-      break;
-    }
-    default: person(0, 0, 1, 'sword');
-  }
-  g.restore();
-}
-
 // Bust portrait for vassals without art: shoulders, head, house colours, initials.
 function drawBust(g, x, y, w, h, col, acc, name, flip = false) {
   g.save();
@@ -355,43 +234,6 @@ function drawCrestFallback(g, x, y, s, col, acc, letter) {
   g.restore();
 }
 
-// Silhouette of a spirit for summons without art.
-function drawSpiritGlyph(g, id, x, y, s, t) {
-  const sp = SPIRITS[id];
-  g.save(); g.translate(x, y);
-  g.shadowColor = sp.color; g.shadowBlur = s * 0.25;
-  g.fillStyle = sp.color; g.strokeStyle = sp.color; g.lineCap = 'round'; g.lineWidth = s * 0.03;
-  const breathe = 1 + Math.sin(t * 2) * 0.03;
-  g.scale(breathe, breathe);
-  if (id === 'ember') {
-    g.beginPath(); g.ellipse(0, s * 0.1, s * 0.28, s * 0.14, 0, 0, 7); g.fill();
-    g.beginPath(); g.moveTo(s * 0.2, s * 0.02); g.lineTo(s * 0.33, -s * 0.2); g.lineTo(s * 0.42, -s * 0.15); g.lineTo(s * 0.3, s * 0.1); g.fill();
-    for (const side of [-1, 1]) { g.beginPath(); g.moveTo(s * 0.35, -s * 0.2); g.lineTo(s * (0.35 + side * 0.12), -s * 0.45); g.lineTo(s * (0.35 + side * 0.2), -s * 0.4); g.moveTo(s * (0.35 + side * 0.07), -s * 0.33); g.lineTo(s * (0.35 + side * 0.18), -s * 0.3); g.stroke(); }
-    for (const lx of [-0.2, -0.1, 0.12, 0.22]) { g.beginPath(); g.moveTo(s * lx, s * 0.18); g.lineTo(s * lx, s * 0.42); g.stroke(); }
-  } else if (id === 'tide') {
-    g.lineWidth = s * 0.09; g.beginPath();
-    for (let i = 0; i <= 40; i++) { const k = i / 40; const px = (k - 0.5) * s * 0.9; const py = Math.sin(k * 9 + t * 2) * s * 0.12 * (1 - k * 0.3) - k * s * 0.15; i ? g.lineTo(px, py) : g.moveTo(px, py); }
-    g.stroke(); g.beginPath(); g.ellipse(s * 0.45, -s * 0.2, s * 0.09, s * 0.06, -0.4, 0, 7); g.fill();
-  } else if (id === 'gale') {
-    g.beginPath(); g.ellipse(0, 0, s * 0.18, s * 0.24, 0, 0, 7); g.fill();
-    for (const side of [-1, 1]) { g.beginPath(); g.moveTo(side * s * 0.1, -s * 0.05); g.quadraticCurveTo(side * s * 0.45, -s * 0.35 + Math.sin(t * 5) * s * 0.05, side * s * 0.55, s * 0.05); g.quadraticCurveTo(side * s * 0.3, s * 0.05, side * s * 0.1, s * 0.12); g.fill(); }
-    g.fillStyle = '#10142a'; g.shadowBlur = 0; for (const side of [-1, 1]) { g.beginPath(); g.arc(side * s * 0.07, -s * 0.08, s * 0.045, 0, 7); g.fill(); }
-  } else if (id === 'stone') {
-    g.beginPath(); g.roundRect(-s * 0.2, -s * 0.25, s * 0.4, s * 0.45, s * 0.05); g.fill();
-    g.beginPath(); g.roundRect(-s * 0.1, -s * 0.42, s * 0.2, s * 0.16, s * 0.03); g.fill();
-    g.fillRect(-s * 0.34, -s * 0.22, s * 0.12, s * 0.38); g.fillRect(s * 0.22, -s * 0.22, s * 0.12, s * 0.38);
-    g.fillRect(-s * 0.16, s * 0.2, s * 0.12, s * 0.22); g.fillRect(s * 0.04, s * 0.2, s * 0.12, s * 0.22);
-  } else if (id === 'dusk') {
-    for (const side of [-1, 1]) {
-      g.beginPath(); g.ellipse(side * s * 0.22, -s * 0.08, s * 0.24, s * 0.17, side * 0.4 + Math.sin(t * 4) * 0.1 * side, 0, 7); g.fill();
-      g.beginPath(); g.ellipse(side * s * 0.16, s * 0.15, s * 0.14, s * 0.1, side * -0.3, 0, 7); g.fill();
-    }
-    g.fillStyle = '#1a1028'; g.shadowBlur = 0; for (const side of [-1, 1]) { g.beginPath(); g.arc(side * s * 0.25, -s * 0.1, s * 0.05, 0, 7); g.fill(); }
-    g.fillStyle = shade(sp.color, -0.3); g.beginPath(); g.ellipse(0, 0, s * 0.05, s * 0.2, 0, 0, 7); g.fill();
-  }
-  g.restore();
-}
-
 // ------------------------------------------------------------------ the view
 
 export async function runBattle(container, input, opts = {}) {
@@ -410,8 +252,6 @@ export async function runBattle(container, input, opts = {}) {
       color: o?.color || h?.color || NEUTRAL.color, accent: o?.accent || h?.accent || NEUTRAL.accent };
   };
   const S = { attacker: sideInfo('attacker'), defender: sideInfo('defender') };
-  // Dark banner colours (e.g. ravens) get a lighter figure colour so units read on the board.
-  const figCol = side => { const [r, g, bb] = hexToRgb(S[side].color); return (r + g + bb) / 3 < 70 ? shade(S[side].color, 0.35) : S[side].color; };
   const province = PROVINCES[b.provinceId] || null;
   const vassalOf = u => (u.vassalId && VASSAL_BY_ID[u.vassalId]) || null;
   const isSpirit = u => u.kind === 'spirit';
@@ -480,8 +320,21 @@ export async function runBattle(container, input, opts = {}) {
     sel: null, hover: null, mode: 'idle', spellDir: 'right', spellAt: null, busy: false,
     auto: playerSide == null, cutin: null, fx: null, now: 0, alive: true, lastStand: new Set(),
     banner: null, weatherT: 0,
+    P: new Particles({ unit: 32, max: 700 }), reduced: reducedMotion(),
+    hitStopUntil: 0, slowUntil: 0, pulse: 0, pulseCol: '200,40,30', spell: null, whiteout: 0, whiteCol: '255,250,235',
   };
-  for (const u of b.units) view.disp.set(u.id, { x: u.x, y: u.y, alpha: u.out ? 0 : 1, flash: 0, phase: hash(u.x, u.y, 7) * 6.28, lunge: null });
+  for (const u of b.units) view.disp.set(u.id, {
+    x: u.x, y: u.y, alpha: u.out ? 0 : 1, flash: 0, phase: hash(u.x, u.y, 7) * 6.28, lunge: null,
+    shown: u.soldiers, facing: u.side === 'attacker' ? 1 : -1, walking: false, walkPh: 0, act: null, recoil: null,
+    squad: null, flee: false, rim: null,
+  });
+  const pals = { attacker: palette(S.attacker.color, S.attacker.accent), defender: palette(S.defender.color, S.defender.accent) };
+  const rims = { attacker: shade(S.attacker.color, 0.5), defender: shade(S.defender.color, 0.5) };
+  // Juice helpers (disabled with prefers-reduced-motion).
+  const shakeBy = v => { if (!view.reduced) view.shake = Math.min(16, Math.max(view.shake, v)); };
+  const hitStop = ms => { if (!view.reduced) view.hitStopUntil = Math.max(view.hitStopUntil, performance.now() + ms); };
+  const slowMo = ms => { if (!view.reduced) view.slowUntil = Math.max(view.slowUntil, performance.now() + ms); };
+  const pulse = (a, col = '200,40,30') => { view.pulse = Math.max(view.pulse, a); view.pulseCol = col; };
 
   // When the player hands the battle to Auto, play it faster with short cut-ins.
   const autoHurry = () => view.auto && playerSide != null;
@@ -504,6 +357,7 @@ export async function runBattle(container, input, opts = {}) {
     const cs = Math.floor(Math.min((view.w - margin * 2) / W, (view.h - margin * 2) / H));
     view.cs = Math.max(12, cs);
     view.ox = Math.round((view.w - view.cs * W) / 2); view.oy = Math.round((view.h - view.cs * H) / 2);
+    view.P.unit = view.cs;
     buildStatic();
     const ro = root.getBoundingClientRect();
     ocv.width = Math.round(ro.width * dpr); ocv.height = Math.round(ro.height * dpr);
@@ -584,8 +438,9 @@ export async function runBattle(container, input, opts = {}) {
     const { cs } = view;
     for (const w of b.tempWalls) {
       const p = px(w.x, w.y);
-      const rise = clamp((view.now - (w.born || 0)) / 400, 0, 1);
       if (!w.born) w.born = view.now;
+      const rise = clamp((view.now - w.born) / 260, 0, 1);
+      if (rise <= 0) continue;
       g.save(); g.translate(p.x, p.y + cs * 0.35);
       g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(0, 0, cs * 0.45, cs * 0.14, 0, 0, 7); g.fill();
       const hgt = cs * 0.75 * easeOut(rise);
@@ -635,14 +490,32 @@ export async function runBattle(container, input, opts = {}) {
     }
   }
 
-  function figureLayout(u) {
-    const big = { golem: 1, wyvern: 1, siege: 2, horse: 3, knights: 3, wolfriders: 3, ghosts: 3 }[u.type] || 5;
-    const n = clamp(Math.ceil(big * u.soldiers / u.start - 1e-9), 1, big);
-    const P = {
-      1: [[0, 0.1]], 2: [[-0.17, 0.02], [0.17, 0.16]], 3: [[-0.2, -0.04], [0.2, 0.0], [0, 0.2]],
-      4: [[-0.2, -0.06], [0.2, -0.06], [-0.2, 0.18], [0.2, 0.18]], 5: [[-0.22, -0.08], [0.22, -0.08], [0, 0.04], [-0.22, 0.2], [0.22, 0.2]],
-    };
-    return P[n];
+  // ---- squads: 1-6 remastered figures per unit by strength, each with its own life
+  function squadOf(u, d) {
+    const N = squadSize(u.type);
+    const want = u.out && !d.flee ? 0 : clamp(Math.ceil(N * d.shown / u.start - 1e-9), d.shown > 0 ? 1 : 0, N);
+    if (!d.squad) {
+      d.squad = formation(N).map((pos, i) => ({ pos, i, dieT: null, ph: hash(i, u.x + u.y, 3) * 6.28 }));
+      d.squad.forEach((f, i) => { if (i >= want) f.dieT = -1e9; });
+    }
+    const alive = d.squad.filter(f => f.dieT == null);
+    if (alive.length > want) {   // the front ranks fall first, staggered
+      const drop = alive.slice(0, alive.length - want);
+      drop.forEach((f, j) => { f.dieT = view.now + j * 70; });
+    }
+    return d.squad;
+  }
+
+  function figPose(u, d, f, t) {
+    if (f.dieT != null && view.now >= f.dieT) return { act: 'fall', k: clamp((view.now - f.dieT) / 900, 0, 1), t };
+    if (d.flee) return { act: 'flee', walk: d.walkPh * 1.4 + f.ph, t, run: true };
+    if (d.act) {
+      const st = d.act.t0 + f.i * (d.act.stagger ?? 55);
+      const k = clamp((view.now - st) / d.act.len, 0, 1);
+      if (view.now >= st && k < 1) return { act: d.act.name, k, t };
+    }
+    if (d.walking) return { act: 'idle', walk: d.walkPh + f.ph * 0.3, t, run: d.run };
+    return { act: 'idle', t: t + f.ph };
   }
 
   function drawUnit(u, d) {
@@ -650,125 +523,141 @@ export async function runBattle(container, input, opts = {}) {
     if (d.alpha <= 0.01) return;
     const base = { x: view.ox + (d.x + 0.5) * cs, y: view.oy + (d.y + 0.5) * cs };
     let lx = 0, ly = 0;
-    if (d.lunge) { const k = Math.sin(Math.PI * d.lunge.p); lx = d.lunge.dx * k * cs * 0.3; ly = d.lunge.dy * k * cs * 0.3; }
+    if (d.lunge) { const k = Math.sin(Math.PI * d.lunge.p); lx = d.lunge.dx * k * cs * (d.lunge.reach ?? 0.3); ly = d.lunge.dy * k * cs * (d.lunge.reach ?? 0.3); }
+    if (d.recoil) { const k = d.recoil.p; lx += d.recoil.dx * Math.sin(Math.PI * k) * cs * d.recoil.amt; ly += d.recoil.dy * Math.sin(Math.PI * k) * cs * d.recoil.amt; }
     const cx = base.x + lx, cy = base.y + ly;
-    const facing = u.side === 'attacker' ? 1 : -1;
-    const col = figCol(u.side), acc = S[u.side].accent;
+    const facing = d.facing;
     const done = !u.out && u.side === b.side && (u.acted) && !isAI(u.side);
     g.save();
-    g.globalAlpha = d.alpha * (done ? 0.7 : 1);
-    // selection ring + shadow
+    g.globalAlpha = d.alpha * (done ? 0.72 : 1);
     if (view.sel === u.id) {
       g.strokeStyle = `rgba(255,215,110,${0.7 + 0.3 * Math.sin(view.now / 140)})`; g.lineWidth = 2.5;
       g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.46, cs * 0.17, 0, 0, 7); g.stroke();
     }
-    g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.4, cs * 0.13, 0, 0, 7); g.fill();
-    g.fillStyle = rgba(S[u.side].color, 0.55); g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.36, cs * 0.1, 0, 0, 7); g.fill();
+    // house-coloured ground disc
+    g.fillStyle = rgba(S[u.side].color, 0.4); g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.38, cs * 0.11, 0, 0, 7); g.fill();
     const t = view.now / 1000;
     if (isSpirit(u)) drawSpiritUnit(u, cx, cy, d, t);
     const sprite = !isSpirit(u) && spriteSlot(u);
     const im = sprite && artImg(sprite.slot);
-    const figs = isSpirit(u) ? [] : figureLayout(u).slice().sort((a, b2) => a[1] - b2[1]);
-    figs.forEach(([fx, fy], i) => {
-      const bob = Math.sin(t * 2.2 + d.phase + i * 1.3) * cs * 0.025;
-      const x = cx + fx * cs * facing, y = cy + fy * cs + cs * 0.22 + bob;
-      if (im) {
-        const src = sprite.tint ? tinted(im, S[u.side].color, sprite.slot) : im;
-        const s = cs * (figs.length === 1 ? 1.0 : 0.7);
-        g.save(); g.translate(x, y); g.scale(facing, 1); g.drawImage(src, -s / 2, -s * 0.92, s, s); g.restore();
-      } else {
-        const s = cs * (figs.length >= 4 ? 0.5 : figs.length === 3 ? 0.56 : 0.62);
-        drawFigure(g, u.type, x, y, s, col, acc, facing, t + d.phase + i * 0.4);
-      }
-    });
-    // banner on the lead (leaderless units carry a plain pennant: no house colours, grey cloth)
-    const bx = cx - cs * 0.32 * facing, by = cy - cs * 0.42;
     if (!isSpirit(u)) {
-    g.strokeStyle = '#2a1d10'; g.lineWidth = Math.max(1.2, cs / 28);
-    g.beginPath(); g.moveTo(bx, by + cs * 0.55); g.lineTo(bx, by); g.stroke();
-    const wave = Math.sin(t * 4 + d.phase) * cs * 0.03;
-    g.fillStyle = S[u.side].color; g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + cs * 0.12 * facing, by - wave, bx + cs * 0.24 * facing, by + cs * 0.04);
-    g.lineTo(bx + cs * 0.2 * facing, by + cs * 0.12); g.quadraticCurveTo(bx + cs * 0.1 * facing, by + cs * 0.14 + wave, bx, by + cs * 0.16); g.fill();
-    if (!u.leader && u.kind !== 'company') { g.fillStyle = 'rgba(20,16,24,0.55)'; g.fill(); }
-    g.strokeStyle = acc; g.lineWidth = 1; g.stroke();
+      const squad = squadOf(u, d);
+      const n = squad.length;
+      const s = cs * (n >= 5 ? 0.5 : n >= 3 ? 0.56 : n === 2 ? 0.62 : 0.7) * (u.type === 'siege' || u.type === 'bombards' ? 0.95 : 1);
+      const order = squad.slice().sort((p, q) => p.pos[1] - q.pos[1]);
+      // soft shadows first
+      for (const f of order) {
+        if (f.dieT != null && view.now - f.dieT > 900) continue;
+        const fx = cx + f.pos[0] * cs * facing, fy = cy + f.pos[1] * cs + cs * 0.24;
+        const r = s * (MOUNTED.has(u.type) || u.type === 'siege' ? 0.5 : 0.28);
+        g.globalAlpha = d.alpha * 0.4 * (f.dieT != null && view.now > f.dieT ? clamp(1 - (view.now - f.dieT) / 900, 0, 1) : 1);
+        g.drawImage(blob(0, 0, 0), fx - r, fy - r * 0.3, r * 2, r * 0.6);
+      }
+      g.globalAlpha = d.alpha * (done ? 0.72 : 1);
+      for (const f of order) {
+        if (f.dieT != null && view.now - f.dieT > 900) continue;
+        const pose = figPose(u, d, f, t);
+        const fx = cx + f.pos[0] * cs * facing, fy = cy + f.pos[1] * cs + cs * 0.24;
+        if (im) {
+          const src = sprite.tint ? tinted(im, S[u.side].color, sprite.slot) : im;
+          const ss = cs * (n === 1 ? 1.0 : 0.7);
+          g.save(); g.translate(fx, fy); g.scale(facing, 1);
+          if (pose.act === 'fall') { g.rotate(-pose.k * 1.4); g.globalAlpha *= 1 - pose.k; }
+          g.drawImage(src, -ss / 2, -ss * 0.92, ss, ss); g.restore();
+        } else blitFigure(g, u.type, pals[u.side], fx, fy, s, facing, pose, rims[u.side]);
+      }
+    }
+    // banner on the lead (leaderless units carry a plain pennant: grey cloth)
+    const bx = cx - cs * 0.36 * facing, by = cy - cs * 0.46;
+    if (!isSpirit(u) && !d.flee) {
+      g.strokeStyle = '#2a1d10'; g.lineWidth = Math.max(1.2, cs / 28);
+      g.beginPath(); g.moveTo(bx, by + cs * 0.6); g.lineTo(bx, by); g.stroke();
+      const wave = Math.sin(t * 4 + d.phase) * cs * 0.04, wave2 = Math.sin(t * 4 + d.phase + 1.4) * cs * 0.03;
+      g.fillStyle = S[u.side].color; g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + cs * 0.12 * facing, by - wave, bx + cs * 0.26 * facing, by + cs * 0.04 + wave2);
+      g.lineTo(bx + cs * 0.22 * facing, by + cs * 0.13 + wave2); g.quadraticCurveTo(bx + cs * 0.1 * facing, by + cs * 0.15 + wave, bx, by + cs * 0.17); g.fill();
+      if (!u.leader && u.kind !== 'company') { g.fillStyle = 'rgba(20,16,24,0.55)'; g.fill(); }
+      g.strokeStyle = S[u.side].accent; g.lineWidth = 1; g.stroke();
     }
     if (isRuler(u)) { g.fillStyle = '#ffd66e'; g.font = `${Math.max(8, cs * 0.22)}px serif`; g.textAlign = 'center'; g.fillText('♛', bx + cs * 0.1 * facing, by - cs * 0.04); }
     // hit flash
     if (d.flash > 0) {
-      g.globalCompositeOperation = 'lighter'; g.fillStyle = `rgba(255,240,220,${d.flash * 0.6})`;
-      g.beginPath(); g.arc(cx, cy, cs * 0.45, 0, 7); g.fill(); g.globalCompositeOperation = 'source-over';
+      g.globalCompositeOperation = 'lighter'; g.globalAlpha = d.flash * 0.7;
+      const r = cs * 0.6; g.drawImage(blob(255, 235, 210), cx - r, cy - r, r * 2, r * 2); g.globalCompositeOperation = 'source-over';
+      g.globalAlpha = d.alpha;
     }
+    if (d.flee) { g.restore(); return; }
     // strength bar + count
-    const frac = u.soldiers / u.start;
+    const frac = d.shown / u.start;
     const bw = cs * 0.78, bh = Math.max(3, cs * 0.08), bxx = cx - bw / 2, byy = cy + cs * 0.42;
     g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(bxx - 1, byy - 1, bw + 2, bh + 2);
     g.fillStyle = frac > 0.6 ? '#7fcf6a' : frac > 0.35 ? '#e6c04a' : '#e0564a'; g.fillRect(bxx, byy, bw * clamp(frac, 0, 1), bh);
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(bxx + bw * routAt(u), byy, 1, bh);   // rout line (30% led, 40% leaderless)
     const fs = Math.max(9, Math.round(cs * 0.24));
     g.font = `700 ${fs}px Cinzel, Georgia, serif`; g.textAlign = 'center';
-    const label = String(u.soldiers), tw = g.measureText(label).width + 6;
-    const tx = cx + cs * 0.3 * facing, ty = cy - cs * 0.3;
+    const label = String(d.shown), tw = g.measureText(label).width + 6;
+    const tx = cx + cs * 0.3 * facing, ty = cy - cs * 0.34;
     g.fillStyle = 'rgba(15,12,18,0.85)'; g.beginPath(); g.roundRect(tx - tw / 2, ty - fs * 0.8, tw, fs * 1.05, 3); g.fill();
     g.strokeStyle = rgba(S[u.side].color, 0.9); g.lineWidth = 1; g.stroke();
     g.fillStyle = '#f5ead0'; g.fillText(label, tx, ty);
-    // status
-    let sx = cx - cs * 0.38;
-    if (u.slowed) { g.fillStyle = '#5ab4ff'; g.beginPath(); g.arc(sx, cy - cs * 0.38, cs * 0.07, 0, 7); g.fill(); sx += cs * 0.17; }
-    if (u.confused) { g.strokeStyle = '#b48aff'; g.lineWidth = 1.5; g.beginPath(); g.arc(sx, cy - cs * 0.38, cs * 0.07, 0, 5); g.stroke(); }
+    // status: slowed (water drops), confused (spinning stars)
+    if (u.slowed && !u.out) { for (let i = 0; i < 3; i++) { const a = t * 2 + i * 2.1; g.fillStyle = 'rgba(110,190,255,0.85)'; g.beginPath(); g.arc(cx + Math.cos(a) * cs * 0.3, cy + cs * 0.3 + Math.sin(a) * cs * 0.06, cs * 0.04, 0, 7); g.fill(); } }
+    if (u.confused && !u.out) {
+      for (let i = 0; i < 3; i++) {
+        const a = t * 3.2 + i * 2.09, x = cx + Math.cos(a) * cs * 0.3, y = cy - cs * 0.52 + Math.sin(a) * cs * 0.08;
+        g.save(); g.translate(x, y); g.rotate(t * 4 + i); g.fillStyle = i % 2 ? '#ffe680' : '#c9a0ff';
+        g.beginPath(); for (let j = 0; j < 10; j++) { const r = j % 2 ? cs * 0.035 : cs * 0.08, aa = j * Math.PI / 5; j ? g.lineTo(Math.cos(aa) * r, Math.sin(aa) * r) : g.moveTo(Math.cos(aa) * r, Math.sin(aa) * r); } g.fill(); g.restore();
+      }
+    }
     g.restore();
   }
 
-  // A summoned spirit: a big glowing form in its colour, larger than its square, floating.
+  // A summoned spirit on the board: the animated creature, floating over its square.
   function drawSpiritUnit(u, cx, cy, d, t) {
     const { cs } = view, sp = SPIRITS[u.type];
-    const fy = cy - cs * 0.1 + Math.sin(t * 1.8 + d.phase) * cs * 0.06;
+    const fly = u.type === 'gale' || u.type === 'dusk';
+    const fy = cy - cs * (fly ? 0.45 : 0.3) + Math.sin(t * 1.8 + d.phase) * cs * 0.06;
     g.save();
-    g.globalCompositeOperation = 'lighter';
-    const gr = g.createRadialGradient(cx, fy, 0, cx, fy, cs * 1.1);
-    gr.addColorStop(0, rgba(sp.color, 0.75 + 0.2 * Math.sin(t * 3))); gr.addColorStop(0.55, rgba(sp.color, 0.25)); gr.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = gr; g.beginPath(); g.arc(cx, fy, cs * 1.1, 0, 7); g.fill();
-    g.restore();
-    // a dark core so the glyph reads against the glow, and rising motes
-    g.fillStyle = 'rgba(8,6,14,0.55)'; g.beginPath(); g.arc(cx, fy, cs * 0.5, 0, 7); g.fill();
-    for (let i = 0; i < 5; i++) {
-      const k = (t * 0.6 + i / 5 + d.phase) % 1;
-      g.fillStyle = rgba(sp.color, 0.8 * (1 - k));
-      g.beginPath(); g.arc(cx + Math.sin(i * 2.3 + t) * cs * 0.4, fy + cs * 0.4 - k * cs * 1.1, cs * 0.04, 0, 7); g.fill();
-    }
-    const im = artImg(sp.art);
-    if (im) {
-      g.save(); g.beginPath(); g.arc(cx, fy, cs * 0.52, 0, 7); g.clip();
-      drawCover(g, im, cx - cs * 0.52, fy - cs * 0.52, cs * 1.04, cs * 1.04); g.restore();
-      g.strokeStyle = sp.color; g.lineWidth = 2; g.beginPath(); g.arc(cx, fy, cs * 0.53, 0, 7); g.stroke();
-    } else {
-      g.save(); g.shadowColor = sp.color; g.shadowBlur = cs * 0.5;
-      drawSpiritGlyph(g, u.type, cx, fy, cs * 1.5, t); g.restore();
-    }
-    // spent marker: a dim ring once its spell is used
+    g.globalAlpha *= 0.4; g.drawImage(blob(0, 0, 0), cx - cs * 0.5, cy + cs * 0.22, cs, cs * 0.25); g.restore();
+    drawSpirit(g, u.type, cx, fy, cs * (u.type === 'tide' ? 1.5 : 1.35), t + d.phase, { facing: d.facing, run: d.walking ? 1 : 0 });
     if (b.spiritUsed[u.side]) { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.setLineDash([3, 3]); g.beginPath(); g.arc(cx, fy, cs * 0.62, 0, 7); g.stroke(); g.setLineDash([]); }
+    void sp;
   }
 
+  // Projectiles: arrows/bolts/thorns with faint trails, bullets as streaks, burning stones and
+  // iron balls with a ground shadow. Each lands once (onLand) and is then removed.
   function drawProjectiles() {
-    const now = view.now;
+    const now = view.now, cs = view.cs;
     view.projectiles = view.projectiles.filter(p => {
+      if (now < p.t0) return true;
       const k = clamp((now - p.t0) / p.dur, 0, 1);
-      const x = lerp(p.a.x, p.b.x, k), y = lerp(p.a.y, p.b.y, k) - Math.sin(Math.PI * k) * p.arc;
-      const k2 = Math.min(1, k + 0.03);
-      const x2 = lerp(p.a.x, p.b.x, k2), y2 = lerp(p.a.y, p.b.y, k2) - Math.sin(Math.PI * k2) * p.arc;
-      const ang = Math.atan2(y2 - y, x2 - x);
-      g.save(); g.translate(x, y); g.rotate(ang);
-      if (p.kind === 'stone') {
-        g.fillStyle = '#5a524a'; g.beginPath(); g.arc(0, 0, view.cs * 0.12, 0, 7); g.fill();
-        g.fillStyle = 'rgba(255,140,50,0.4)'; g.beginPath(); g.arc(-view.cs * 0.1, 0, view.cs * 0.08, 0, 7); g.fill();
+      const pos = kk => ({ x: lerp(p.a.x, p.b.x, kk), y: lerp(p.a.y, p.b.y, kk) - Math.sin(Math.PI * kk) * p.arc });
+      const c = pos(k), q = pos(Math.max(0, k - 0.06));
+      const ang = Math.atan2(c.y - q.y, c.x - q.x);
+      if (p.kind === 'stone' || p.kind === 'ball') {
+        const gx = lerp(p.a.x, p.b.x, k), gy = lerp(p.a.y, p.b.y, k) + cs * 0.3;
+        g.save(); g.globalAlpha = 0.25 + 0.2 * k; const r = cs * (0.12 + 0.1 * (1 - Math.sin(Math.PI * k))); g.drawImage(blob(0, 0, 0), gx - r, gy - r * 0.4, r * 2, r * 0.8); g.restore();
+        if (p.kind === 'stone' && Math.random() < 0.8) view.P.fire(c.x, c.y, 1, 0.16);
+        if (Math.random() < 0.4) view.P.smoke(c.x, c.y, 1, 0.22, p.kind === 'ball' ? 100 : 50, 0);
+        g.fillStyle = p.kind === 'stone' ? '#5a524a' : '#1e2024'; g.beginPath(); g.arc(c.x, c.y, cs * (p.kind === 'stone' ? 0.11 : 0.08), 0, 7); g.fill();
+        if (p.kind === 'stone') { g.save(); g.globalCompositeOperation = 'lighter'; const r2 = cs * 0.3; g.drawImage(blob(255, 140, 40), c.x - r2, c.y - r2, r2 * 2, r2 * 2); g.restore(); }
+      } else if (p.kind === 'bullet') {
+        g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(255,230,170,0.95)'; g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(c.x, c.y); g.lineTo(c.x - Math.cos(ang) * cs * 0.4, c.y - Math.sin(ang) * cs * 0.4); g.stroke(); g.restore();
       } else {
-        for (let i = 0; i < p.count; i++) {
-          const oy = (i - (p.count - 1) / 2) * view.cs * 0.08, ox = -i * view.cs * 0.05;
-          g.strokeStyle = '#e8dcc0'; g.lineWidth = 1.3; g.beginPath(); g.moveTo(ox - view.cs * 0.18, oy); g.lineTo(ox + view.cs * 0.08, oy); g.stroke();
-          g.fillStyle = '#ccc'; g.beginPath(); g.moveTo(ox + view.cs * 0.12, oy); g.lineTo(ox + view.cs * 0.06, oy - 2); g.lineTo(ox + view.cs * 0.06, oy + 2); g.fill();
-        }
+        g.save();
+        g.strokeStyle = 'rgba(255,255,235,0.16)'; g.lineWidth = 1.2;
+        const tq = pos(Math.max(0, k - 0.15));
+        g.beginPath(); g.moveTo(tq.x, tq.y); g.lineTo(c.x, c.y); g.stroke();
+        g.translate(c.x, c.y); g.rotate(ang);
+        const L = cs * (p.kind === 'bolt' ? 0.2 : 0.28);
+        g.strokeStyle = p.kind === 'thorn' ? '#7ad060' : '#e8dcc0'; g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(-L, 0); g.lineTo(0, 0); g.stroke();
+        g.fillStyle = p.kind === 'thorn' ? '#b0ff90' : '#cdd1d6'; g.beginPath(); g.moveTo(cs * 0.06, 0); g.lineTo(-cs * 0.01, -cs * 0.03); g.lineTo(-cs * 0.01, cs * 0.03); g.fill();
+        if (p.kind === 'arrow') { g.fillStyle = '#c84040'; g.fillRect(-L, -cs * 0.025, cs * 0.05, cs * 0.05); }
+        g.restore();
       }
-      g.restore();
-      return k < 1;
+      if (k >= 1) { if (p.onLand) p.onLand(p); return false; }
+      return true;
     });
   }
 
@@ -888,6 +777,16 @@ export async function runBattle(container, input, opts = {}) {
     const W2 = ocv.width / view.dpr, H2 = ocv.height / view.dpr;
     og.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     og.clearRect(0, 0, W2, H2);
+    if (c.scene) {   // fixed 60 Hz choreography, rendered with interpolation
+      c.acc += dt * speed();
+      let n = 0;
+      while (c.acc >= 1 / 60 && n++ < 8) { c.scene.step(); c.fx.update(); c.acc -= 1 / 60; }
+      const f = c.scene.f, L = c.scene.length;
+      const open = f < 9 ? easeOut(f / 9) : f > L - 9 ? easeOut(Math.max(0, L - f) / 9) : 1;
+      c.fx.render(og, W2, H2, clamp(c.acc * 60, 0, 1), open);
+      if (c.scene.done || c.skip) { view.cutin = null; overlay.hidden = true; c.res(); }
+      return;
+    }
     const k = clamp((view.now - c.t0) / c.dur, 0, 1);
     c.draw(og, W2, H2, k, dt);
     if (k >= 1 || c.skip) { view.cutin = null; overlay.hidden = true; c.res(); }
@@ -908,34 +807,6 @@ export async function runBattle(container, input, opts = {}) {
     return { y: H2 / 2 - bh / 2 * open, h: bh * open, full: bh, open };
   }
 
-  function cutinBackground(cg, slot, x, y, w, h, k, colA, colB, type) {
-    const im = artImg(slot);
-    if (im) {
-      cg.save(); cg.beginPath(); cg.rect(x, y, w, h); cg.clip();
-      drawCover(cg, im, x, y, w, h, 1.08 + 0.1 * k, 0.35 + 0.3 * k, 0.5);
-      cg.restore();
-      return;
-    }
-    cg.save(); cg.beginPath(); cg.rect(x, y, w, h); cg.clip();
-    const grd = cg.createLinearGradient(x, y, x + w, y + h);
-    grd.addColorStop(0, shade(colA, -0.45)); grd.addColorStop(0.5, '#1a1420'); grd.addColorStop(1, shade(colB, -0.45));
-    cg.fillStyle = grd; cg.fillRect(x, y, w, h);
-    // speed lines
-    cg.strokeStyle = 'rgba(255,255,255,0.08)'; cg.lineWidth = 2;
-    for (let i = 0; i < 30; i++) {
-      const yy = y + h * hash(i, 1, 3), xx = x + ((hash(i, 2, 3) * w * 1.5 + k * w * 1.4 * (0.6 + hash(i, 4, 3))) % (w * 1.4)) - w * 0.2;
-      cg.beginPath(); cg.moveTo(xx, yy); cg.lineTo(xx + w * 0.15, yy); cg.stroke();
-    }
-    // ground and charging silhouettes, panning
-    cg.fillStyle = 'rgba(0,0,0,0.45)'; cg.fillRect(x, y + h * 0.78, w, h * 0.22);
-    const pan = (k * 0.12) * w;
-    for (let i = 0; i < 9; i++) {
-      const fx = x + w * (0.08 + i * 0.1) - pan, fy = y + h * (0.82 + 0.06 * hash(i, 5, 5));
-      cg.save(); cg.globalAlpha = 0.55; drawFigure(cg, type, fx, fy, h * (0.32 + 0.1 * hash(i, 6, 6)), '#15111a', '#2a2430', 1, view.now / 1000 + i); cg.restore();
-    }
-    cg.restore();
-  }
-
   function portraitCard(cg, u, x, y, w, h, side, flip) {
     const slot = portraitSlot(u);
     const im = artImg(slot);
@@ -950,11 +821,11 @@ export async function runBattle(container, input, opts = {}) {
       const grd = cg.createRadialGradient(x + w / 2, y + h * 0.45, 0, x + w / 2, y + h * 0.45, h * 0.7);
       grd.addColorStop(0, rgba(sp.color, 0.6)); grd.addColorStop(1, '#0c0912');
       cg.fillStyle = grd; cg.fillRect(x, y, w, h);
-      cg.save(); cg.shadowColor = sp.color; cg.shadowBlur = h * 0.15; drawSpiritGlyph(cg, u.type, x + w / 2, y + h * 0.48, Math.min(w, h) * 0.85, view.now / 1000); cg.restore();
+      cg.save(); cg.beginPath(); cg.rect(x, y, w, h); cg.clip(); drawSpirit(cg, u.type, x + w / 2, y + h * 0.5, Math.min(w, h) * 0.95, view.now / 1000); cg.restore();
     } else {   // leaderless troop / company / militia: draw the troop and its banner as the card
       const grd = cg.createLinearGradient(x, y, x, y + h); grd.addColorStop(0, shade(S[side].color, -0.3)); grd.addColorStop(1, '#120e16');
       cg.fillStyle = grd; cg.fillRect(x, y, w, h);
-      drawFigure(cg, u.type, x + w / 2, y + h * 0.88, h * 0.55, figCol(side), S[side].accent, flip ? -1 : 1, view.now / 1000);
+      blitFigure(cg, u.type, pals[side], x + w / 2, y + h * 0.9, h * 0.5, flip ? -1 : 1, { act: 'idle', t: view.now / 1000 }, rims[side]);
       if (u.kind === 'troop' || u.kind === 'militia') {   // "no leader" ribbon
         const rh = Math.max(10, h * 0.11);
         cg.fillStyle = 'rgba(12,9,16,0.8)'; cg.fillRect(x, y + h * 0.04, w, rh);
@@ -988,83 +859,58 @@ export async function runBattle(container, input, opts = {}) {
     else sfx.play('clash');
   }
 
-  // A clash cut-in: attacker left, defender right (from the attacker's point of view).
-  function clashCutin(att, def, hit, counter) {
-    if (cutMode() === 'off') return Promise.resolve();
-    const short = cutMode() === 'short';
-    const dur = short ? 750 : (counter ? 1750 : 1300);
-    const strikeAt = short ? 0.3 : (counter ? 0.3 : 0.4);
-    const counterAt = 0.62;
-    const aStart = att.soldiers + (counter ? counter.killed : 0), dStart = def.soldiers + hit.killed;
-    let struck = false, countered = false;
-    const parts = [];
-    const sparks = (x, y, n, col) => { for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = 120 + Math.random() * 380; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 80, life: 0.5 + Math.random() * 0.4, max: 0.9, size: 1.5 + Math.random() * 2.5, color: col, grav: 500 }); } };
-    const dust = (x, y, n) => { for (let i = 0; i < n; i++) parts.push({ x: x + (Math.random() - 0.5) * 80, y, vx: (Math.random() - 0.5) * 60, vy: -20 - Math.random() * 40, life: 0.9, max: 0.9, size: 20 + Math.random() * 25, color: 'rgba(170,150,120,0.35)', puff: true }); };
-    return showCutin(dur, (cg, W2, H2, k, dt) => {
-      const bd = band(W2, H2, k, short ? 0.15 : 0.1, short ? 0.15 : 0.1);
-      let shake = 0;
-      if (k > strikeAt && k < strikeAt + 0.12) shake = (1 - (k - strikeAt) / 0.12) * 12;
-      if (counter && k > counterAt && k < counterAt + 0.1) shake = Math.max(shake, (1 - (k - counterAt) / 0.1) * 7);
-      const sx = (Math.random() - 0.5) * shake, sy = (Math.random() - 0.5) * shake;
-      cg.save(); cg.translate(sx, sy);
-      // dim the board
-      cg.fillStyle = `rgba(5,4,8,${0.55 * bd.open})`; cg.fillRect(-20, -20, W2 + 40, H2 + 40);
-      cutinBackground(cg, isSpirit(att) ? SPIRIT_CUTIN[att.type] : (CLASH_CUTIN[att.type] ?? CLASH_CUTIN.footmen), 0, bd.y, W2, bd.h, k, S[att.side].color, S[def.side].color, isSpirit(att) ? 'footmen' : att.type);
-      // gold rules
-      cg.fillStyle = '#d8b05a'; cg.fillRect(0, bd.y - 2, W2, 2); cg.fillRect(0, bd.y + bd.h, W2, 2);
-      if (bd.open > 0.6) {
-        const ph = bd.full * 0.62, pw = ph * 0.8;
-        const slideA = k < 0.18 ? easeOut(k / 0.18) : 1, slideD = k < 0.22 ? easeOut(Math.max(0, k - 0.04) / 0.18) : 1;
-        const ax = lerp(-pw, W2 * 0.05, slideA), dx = lerp(W2 + pw, W2 * 0.95 - pw, slideD);
-        const py = bd.y + (bd.h - ph) / 2 - bd.full * 0.04;
-        const aLunge = k > strikeAt - 0.08 && k < strikeAt + 0.1 ? Math.sin((k - strikeAt + 0.08) / 0.18 * Math.PI) * W2 * 0.03 : 0;
-        const dLunge = counter && k > counterAt - 0.08 && k < counterAt + 0.1 ? -Math.sin((k - counterAt + 0.08) / 0.18 * Math.PI) * W2 * 0.03 : 0;
-        portraitCard(cg, att, ax + aLunge, py, pw, ph, att.side, false);
-        portraitCard(cg, def, dx + dLunge, py, pw, ph, def.side, true);
-        const cs2 = ph * 0.38;
-        crestAt(cg, att.side, ax + aLunge + cs2 * 0.1, py + cs2 * 0.05, cs2 * 0.8);
-        crestAt(cg, def.side, dx + pw + dLunge - cs2 * 0.1, py + cs2 * 0.05, cs2 * 0.8);
-        const fs = Math.max(12, bd.full * 0.07);
-        text(cg, unitName(att), ax, py + ph + fs * 1.3, fs, '#f5ead0');
-        text(cg, (isSpirit(att) || !vassalOf(att)) ? roleOf(att) : `${statsOf(att.type).name} · ${roleOf(att)}`, ax, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'left', 500);
-        text(cg, unitName(def), dx + pw, py + ph + fs * 1.3, fs, '#f5ead0', 'right');
-        text(cg, (isSpirit(def) || !vassalOf(def)) ? roleOf(def) : `${statsOf(def.type).name} · ${roleOf(def)}`, dx + pw, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'right', 500);
-        // ticking counts
-        const tickD = clamp((k - strikeAt) / 0.18, 0, 1), tickA = counter ? clamp((k - counterAt) / 0.18, 0, 1) : 0;
-        const dNow = Math.round(lerp(dStart, def.soldiers, easeOut(tickD)));
-        const aNow = Math.round(lerp(aStart, att.soldiers, easeOut(tickA)));
-        const big = Math.max(18, bd.full * 0.13);
-        text(cg, String(aNow), ax + pw + cs2 * 0.2 + aLunge, py + ph * 0.95, big, '#ffffff', 'left', 900);
-        text(cg, String(dNow), dx - cs2 * 0.2 + dLunge, py + ph * 0.95, big, '#ffffff', 'right', 900);
-        // strike
-        const midX = W2 / 2, midY = bd.y + bd.h * 0.45;
-        if (k >= strikeAt && !struck) { struck = true; if (hit.ranged) sfx.play('hit'); else clashSfx(att.type); sparks(midX + W2 * 0.12, midY, 50, '#ffd080'); sparks(midX + W2 * 0.12, midY, 25, '#ffffff'); dust(midX + W2 * 0.12, bd.y + bd.h * 0.85, 8); }
-        if (counter && k >= counterAt && !countered) { countered = true; sfx.play('clash'); sparks(midX - W2 * 0.12, midY, 30, '#ffb070'); }
-        if (k >= strikeAt) {
-          const kk = clamp((k - strikeAt) / 0.5, 0, 1);
-          text(cg, '-' + hit.killed, midX + W2 * 0.13, midY - easeOut(kk) * bd.full * 0.12, big * (1.25 - 0.25 * kk), '#ff6a50', 'center', 900);
-          if (hit.rout) text(cg, def.out === 'dead' ? 'DESTROYED' : isSpirit(def) ? 'BANISHED' : 'ROUTED', midX + W2 * 0.13, midY + big * 0.9, big * 0.55, '#ffd27a', 'center', 900);
-        }
-        if (counter && k >= counterAt) {
-          const kk = clamp((k - counterAt) / 0.4, 0, 1);
-          text(cg, '-' + counter.killed, midX - W2 * 0.13, midY - easeOut(kk) * bd.full * 0.12, big * (1.15 - 0.2 * kk), '#ff9a70', 'center', 900);
-          text(cg, 'COUNTER', midX - W2 * 0.13, midY + big * 0.8, big * 0.45, '#ffd27a', 'center', 900);
-        }
-      }
-      // particles
-      cg.save(); cg.beginPath(); cg.rect(0, bd.y, W2, bd.h); cg.clip();
-      for (let i = parts.length - 1; i >= 0; i--) {
-        const p = parts[i]; p.life -= dt; if (p.life <= 0) { parts.splice(i, 1); continue; }
-        p.vy += (p.grav || 0) * dt; p.x += p.vx * dt; p.y += p.vy * dt;
-        cg.globalAlpha = clamp(p.life / p.max, 0, 1);
-        if (p.puff) { const gr = cg.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size); gr.addColorStop(0, p.color); gr.addColorStop(1, 'rgba(0,0,0,0)'); cg.fillStyle = gr; cg.beginPath(); cg.arc(p.x, p.y, p.size, 0, 7); cg.fill(); }
-        else { cg.globalCompositeOperation = 'lighter'; cg.fillStyle = p.color; cg.beginPath(); cg.arc(p.x, p.y, p.size, 0, 7); cg.fill(); cg.globalCompositeOperation = 'source-over'; }
-      }
-      cg.restore();
-      // hit flash
-      if (k > strikeAt && k < strikeAt + 0.06) { cg.fillStyle = `rgba(255,250,235,${0.55 * (1 - (k - strikeAt) / 0.06)})`; cg.fillRect(0, bd.y, W2, bd.h); }
-      if (counter && k > counterAt && k < counterAt + 0.05) { cg.fillStyle = `rgba(255,220,200,${0.35 * (1 - (k - counterAt) / 0.05)})`; cg.fillRect(0, bd.y, W2, bd.h); }
-      cg.restore();
+  // ---- the clash: a pre-fight info screen, then the animated scene (choreo.js + clashfx.js)
+  const verbOf = u => isSpirit(u) ? 'strikes' : MOUNTED.has(u.type) ? 'charge' : u.type === 'siege' || POWDER.has(u.type) ? 'open fire' :
+    u.type === 'archers' || u.type === 'bandits' ? 'loose' : u.type === 'wyvern' ? 'dives' : 'attack';
+  const terrName = u => { const tt = TERRAIN[terrainAt(b, u.x, u.y)]; return tt ? `${tt.name}${tt.def !== 1 ? ` ×${tt.def}` : ''}` : '—'; };
+  const typeName = u => isSpirit(u) ? 'Summoned spirit' : statsOf(u.type).name;
+  const leaderLine = u => vassalOf(u) ? `${vassalOf(u).name}, ${vassalOf(u).title}` : isSpirit(u) ? SPIRITS[u.type].spell : u.kind === 'company' ? 'Hired company' : u.kind === 'militia' ? 'Local militia' : 'No leader';
+  const roleSides = (att, def) => ({ attacker: att, defender: def });
+
+  function infoCard(att, def, hit, counter, before) {
+    const R = roleSides(att, def);
+    const sideData = (u, n) => ({ house: S[u.side].full, col: shade(S[u.side].color, 0.4), unit: typeName(u), leader: leaderLine(u),
+      noLeader: !vassalOf(u) && !isSpirit(u) && u.kind !== 'company', soldiers: n, training: isSpirit(u) ? '—' : u.training, terrain: terrName(u) });
+    const round5 = n => Math.max(1, Math.round(n / 5) * 5);
+    const d = {
+      caption: `${unitName(att)} ${verbOf(att)}`,
+      sides: { attacker: sideData(att, before.att), defender: sideData(def, before.def) },
+      expected: { kill: round5(hit.killed), counter: counter ? round5(counter.killed) : 0, ranged: !!hit.ranged },
+      drawPortrait: (cg, role, x, y, w, h, flip) => portraitCard(cg, R[role], x, y, w, h, R[role].side, flip),
+      drawCrest: (cg, role, x, y, s2) => crestAt(cg, R[role].side, x, y, s2),
+    };
+    return showCutin(1900, (cg, W2, H2, k) => drawInfoCard(cg, W2, H2, k, d));
+  }
+
+  function clashCutin(att, def, hit, counter, before) {
+    const mode = cutMode();
+    if (mode === 'off') return Promise.resolve();
+    const short = mode === 'short';
+    const R = roleSides(att, def);
+    const pre = !short && prefs.info !== 'off' ? infoCard(att, def, hit, counter, before) : Promise.resolve();
+    return pre.then(() => {
+      const cfg = {
+        seed: (hash(att.x * 31 + def.x, att.y * 17 + def.y, b.round) * 1e9) | 0, short, terrain: b.terrain, weather: b.weather, season: b.season,
+        att: { type: att.type, kind: att.kind, spirit: isSpirit(att) ? att.type : null, before: before.att, after: att.soldiers },
+        def: { type: def.type, kind: def.kind, spirit: isSpirit(def) ? def.type : null, before: before.def, after: def.soldiers },
+        hit: { killed: hit.killed, ranged: !!hit.ranged, rout: !!hit.rout }, counter: counter ? { killed: counter.killed, rout: !!counter.rout } : null,
+      };
+      const scene = new ClashScene(cfg);
+      const nm = u => ({ house: S[u.side].full, title: `${typeName(u)} · ${vassalOf(u) ? vassalOf(u).name : roleOf(u)}`, col: shade(S[u.side].color, 0.45),
+        noLeader: !vassalOf(u) && !isSpirit(u) && (u.kind === 'troop' || u.kind === 'militia') });
+      const fx = new ClashRenderer(scene, {
+        colours: { attacker: { color: S[att.side].color, accent: S[att.side].accent }, defender: { color: S[def.side].color, accent: S[def.side].accent } },
+        names: { attacker: nm(att), defender: nm(def) },
+        art: artImg(isSpirit(att) ? SPIRIT_CUTIN[att.type] : (CLASH_CUTIN[att.type] ?? null)),
+        terrain: b.terrain, weather: b.weather, season: b.season, caption: `${unitName(att)} ${verbOf(att)}`,
+        drawPortrait: (cg, role, x, y, w, h, flip) => portraitCard(cg, R[role], x, y, w, h, R[role].side, flip),
+        drawCrest: (cg, role, x, y, s2) => crestAt(cg, R[role].side, x, y, s2),
+        sfx: name => sfx.play(name),
+      });
+      return new Promise(res => {
+        overlay.hidden = false;
+        view.cutin = { scene, fx, acc: 0, res, skip: false };
+      });
     });
   }
 
@@ -1091,10 +937,11 @@ export async function runBattle(container, input, opts = {}) {
         drawCover(cg, im, 0, H2 / 2 - bh / 2, W2, bh, 1.05 + 0.12 * k, 0.5, 0.45);
         cg.restore();
         cg.fillStyle = sp.color; cg.globalAlpha = appear; cg.fillRect(0, H2 / 2 - bh / 2 - 2, W2, 2); cg.fillRect(0, H2 / 2 + bh / 2, W2, 2); cg.globalAlpha = 1;
+        cg.save(); cg.globalCompositeOperation = 'lighter'; cg.globalAlpha = 0.35 * appear;
+        const gr2 = cg.createRadialGradient(W2 / 2, H2 / 2, 0, W2 / 2, H2 / 2, bh * 0.6); gr2.addColorStop(0, sp.color); gr2.addColorStop(1, 'rgba(0,0,0,0)');
+        cg.fillStyle = gr2; cg.fillRect(0, H2 / 2 - bh / 2, W2, bh); cg.restore();
       } else {
-        cg.save(); cg.globalAlpha = appear;
-        drawSpiritGlyph(cg, spiritId, W2 / 2, H2 * 0.45, Math.min(W2, H2) * 0.55 * (0.9 + 0.1 * k), view.now / 1000);
-        cg.restore();
+        drawSpirit(cg, spiritId, W2 / 2, H2 * 0.45 + (1 - appear) * H2 * 0.08, Math.min(W2, H2) * 0.62 * (0.9 + 0.1 * k), view.now / 1000, { alpha: appear, glow: 1 });
       }
       // motes
       if (motes.length < 90 && k < 0.8) for (let i = 0; i < 4; i++) motes.push({ x: Math.random() * W2, y: H2 + 10, v: 60 + Math.random() * 160, s: 1 + Math.random() * 3, life: 2 });
@@ -1184,8 +1031,8 @@ export async function runBattle(container, input, opts = {}) {
     const im = artImg(portraitSlot(u));
     if (im) drawCover(cg, im, 0, 0, 72, 90);
     else if (u.vassalId) drawBust(cg, 0, 0, 72, 90, S[u.side].color, S[u.side].accent, unitName(u));
-    else if (isSpirit(u)) { const sp = SPIRITS[u.type]; cg.fillStyle = shade(sp.color, -0.7); cg.fillRect(0, 0, 72, 90); drawSpiritGlyph(cg, u.type, 36, 45, 64, 0); }
-    else { cg.fillStyle = shade(S[u.side].color, -0.5); cg.fillRect(0, 0, 72, 90); drawFigure(cg, u.type, 36, 80, 50, figCol(u.side), S[u.side].accent, 1, 0); }
+    else if (isSpirit(u)) { const sp = SPIRITS[u.type]; cg.fillStyle = shade(sp.color, -0.7); cg.fillRect(0, 0, 72, 90); drawSpirit(cg, u.type, 36, 46, 66, 1); }
+    else { cg.fillStyle = shade(S[u.side].color, -0.5); cg.fillRect(0, 0, 72, 90); blitFigure(cg, u.type, pals[u.side], 36, 82, 46, 1, { act: 'idle', t: 0 }, rims[u.side]); }
     return c;
   }
   const rosterEls = new Map();
@@ -1268,7 +1115,7 @@ export async function runBattle(container, input, opts = {}) {
     cg.clearRect(0, 0, 40, 40);
     const im = artImg(SPIRITS[mySp].art);
     if (im) { cg.save(); cg.beginPath(); cg.arc(20, 20, 19, 0, 7); cg.clip(); drawCover(cg, im, 0, 0, 40, 40); cg.restore(); }
-    else { cg.fillStyle = '#120e18'; cg.beginPath(); cg.arc(20, 20, 19, 0, 7); cg.fill(); drawSpiritGlyph(cg, mySp, 20, 21, 34, 0); }
+    else { cg.fillStyle = '#120e18'; cg.beginPath(); cg.arc(20, 20, 19, 0, 7); cg.fill(); drawSpirit(cg, mySp, 20, 21, 36, 1); }
   }
 
   function log(textLine) {
@@ -1313,18 +1160,28 @@ export async function runBattle(container, input, opts = {}) {
       const e = events[i];
       if (e.t === 'move') {
         const d = view.disp.get(e.unit), u = getUnit(b, e.unit);
-        const st = statsOf(u.type);
-        if (['horse', 'knights', 'wolfriders'].includes(u.type)) sfx.play('hooves');
+        const mounted = MOUNTED.has(u.type) || u.type === 'wyvern';
+        if (mounted) sfx.play('hooves');
         const dist2 = Math.abs(e.to.x - e.from.x) + Math.abs(e.to.y - e.from.y);
         const from = { ...e.from };
-        await tween(140 + dist2 * 70, k => { const kk = ease(k); d.x = lerp(from.x, e.to.x, kk); d.y = lerp(from.y, e.to.y, kk); if (Math.random() < 0.3) dustAt(d.x, d.y, 1); });
-        d.x = e.to.x; d.y = e.to.y;
-        void st;
+        if (e.to.x !== e.from.x) d.facing = e.to.x > e.from.x ? 1 : -1;
+        d.walking = true; d.run = mounted;
+        let lastX = from.x, lastY = from.y;
+        await tween(180 + dist2 * (mounted ? 70 : 95), k => {
+          const kk = ease(k); d.x = lerp(from.x, e.to.x, kk); d.y = lerp(from.y, e.to.y, kk);
+          const moved = Math.hypot(d.x - lastX, d.y - lastY); lastX = d.x; lastY = d.y;
+          d.walkPh += moved * (mounted ? 9 : 14);
+          if (Math.random() < (mounted ? 0.5 : 0.22)) dustAt(d.x, d.y, 1);
+        });
+        d.x = e.to.x; d.y = e.to.y; d.walking = false; d.run = false;
       } else if (e.t === 'hit' && e.confused) {
-        const t = getUnit(b, e.target), d = view.disp.get(t.id);
-        d.flash = 1; sfx.play('hit');
+        const t = getUnit(b, e.target), d = view.disp.get(t.id), src = getUnit(b, e.unit), ds = view.disp.get(src.id);
+        ds.act = { name: attackAct(src.type) === 'draw' ? 'swing' : attackAct(src.type), t0: view.now, len: 420 };
+        await wait(220);
+        d.flash = 1; sfx.play('hit'); d.shown = Math.max(t.soldiers, d.shown - e.killed);
+        const p = px(t.x, t.y); view.P.clash(p.x, p.y - view.cs * 0.2, 0.4, [200, 160, 255]);
         floatText(t.x, t.y, '-' + e.killed, '#c9a0ff');
-        const src = getUnit(b, e.unit); floatText(src.x, src.y, 'Bewildered!', '#c9a0ff');
+        floatText(src.x, src.y, 'Bewildered!', '#c9a0ff');
         await tween(300, k => { d.flash = 1 - k; });
       } else if (e.t === 'hit' && !e.counter) {
         const att = getUnit(b, e.unit), def = getUnit(b, e.target);
@@ -1337,19 +1194,22 @@ export async function runBattle(container, input, opts = {}) {
         i = j - 1;
         await attackSequence(att, def, e, counter, !!next, !!counterRout);
       } else if (e.t === 'hit' && e.counter) {
-        // counter without preceding hit (should not happen) — show a number
-        floatText(getUnit(b, e.target).x, getUnit(b, e.target).y, '-' + e.killed, '#ff9a70');
+        const t = getUnit(b, e.target); view.disp.get(t.id).shown = t.soldiers;
+        floatText(t.x, t.y, '-' + e.killed, '#ff9a70');
       } else if (e.t === 'rout') {
         await routUnit(getUnit(b, e.unit));
       } else if (e.t === 'spell') {
-        await spellSequence(e);
+        await spellSequence(e, events.slice(i + 1));
       } else if (e.t === 'heal') {
         const u = getUnit(b, e.unit);
+        view.disp.get(u.id).shown = u.soldiers;
         floatText(u.x, u.y, '+' + e.amount, '#8dffa0');
-        spawn(10, () => { const p = px(u.x, u.y); return { x: p.x + (Math.random() - 0.5) * view.cs * 0.6, y: p.y + view.cs * 0.2, vx: 0, vy: -40 - Math.random() * 30, life: 0.9, max: 0.9, size: 2.2, color: '#9dff9a', add: true }; });
+        const p = px(u.x, u.y);
+        view.P.embers(p.x, p.y + view.cs * 0.1, 10, [140, 255, 150], 0.7);
       } else if (e.t === 'gate') {
         sfx.play('gate');
-        const u = getUnit(b, e.unit);
+        const u = getUnit(b, e.unit), p = px(u.x, u.y);
+        view.P.explode(p.x, p.y, 0.9, [255, 170, 80]); view.P.debris(p.x, p.y, 12, [110, 80, 50], 4); shakeBy(10);
         await momentCutin(BATTLE_MOMENT.gateBreach, 'The Gate Falls!', bark(vassalOf(u), 'gate', view.now | 0), '#ffb060');
         showBark(u, 'gate');
       } else if (e.t === 'side') {
@@ -1363,44 +1223,121 @@ export async function runBattle(container, input, opts = {}) {
       }
       updateHud();
     }
+    for (const u of b.units) { const d = view.disp.get(u.id); if (d) d.shown = u.soldiers; }
   }
 
   function dustAt(cx, cy, n) {
     const p = px(cx, cy);
-    spawn(n, () => ({ x: p.x + (Math.random() - 0.5) * view.cs * 0.5, y: p.y + view.cs * 0.35, vx: (Math.random() - 0.5) * 20, vy: -10 - Math.random() * 15, life: 0.6, max: 0.6, size: view.cs * 0.18, color: b.season === 3 ? 'rgba(240,245,255,0.45)' : 'rgba(170,150,110,0.4)', kind: 'puff' }));
+    if (b.season === 3) view.P.snowPuff(p.x, p.y + view.cs * 0.32, n);
+    else view.P.dust(p.x, p.y + view.cs * 0.32, n, b.terrain === 'marsh' ? [120, 130, 100] : [175, 155, 120], 0.22);
+  }
+
+  // Board-level impact on the defender: figures drop, sparks, numbers, camera kick.
+  function boardImpact(att, def, hit, dD, ranged, power) {
+    const p = px(def.x, def.y), cs = view.cs;
+    dD.shown = def.soldiers; dD.flash = 1;
+    const big = hit.killed >= Math.max(25, def.start * 0.15);
+    if (!ranged) view.P.clash(p.x - Math.sign(def.x - att.x) * cs * 0.25, p.y - cs * 0.15, power, [255, 210, 140]);
+    else view.P.hit(p.x, p.y);
+    if (b.terrain === 'forest' || terrainAt(b, def.x, def.y) === 'forest') view.P.leaves(p.x, p.y - cs * 0.3, 4);
+    dustAt(def.x, def.y, 3);
+    shakeBy(clamp(3 + hit.killed / 8, 3, 13));
+    if (big) { hitStop(70); pulse(0.35); }
+    floatText(def.x, def.y, '-' + hit.killed, '#ff6a50', true);
+    const dir = { dx: Math.sign(def.x - att.x) || 0, dy: Math.sign(def.y - att.y) || 0 };
+    dD.recoil = { p: 0, ...dir, amt: MOUNTED.has(att.type) ? 0.22 : 0.1 };
+    tween(260, k => { if (dD.recoil) dD.recoil.p = k; }).then(() => { dD.recoil = null; });
   }
 
   async function attackSequence(att, def, hit, counter, routed, counterRouted) {
     const dA = view.disp.get(att.id), dD = view.disp.get(def.id);
-    const ranged = hit.ranged;
-    if (ranged) {
-      const a = px(att.x, att.y), bb = px(def.x, def.y);
-      const kind = att.type === 'siege' ? 'stone' : 'arrow';
-      const dur = (kind === 'stone' ? 650 : 420) / speed();
-      if (kind === 'stone') sfx.play('catapult'); else sfx.play('arrows');
-      view.projectiles.push({ a: { x: a.x, y: a.y - view.cs * 0.3 }, b: bb, t0: view.now, dur, kind, arc: view.cs * (kind === 'stone' ? 2.4 : 1.1) + Math.abs(bb.x - a.x) * 0.15, count: kind === 'arrow' ? 3 : 1 });
-      await wait(kind === 'stone' ? 650 : 420);
-    } else {
-      dA.lunge = { p: 0, dx: Math.sign(def.x - att.x), dy: Math.sign(def.y - att.y) };
-      await tween(160, k => { dA.lunge.p = k * 0.5; });
-    }
-    // cut-in for the exchange (melee always; ranged only in Full mode)
+    const ranged = hit.ranged, cs = view.cs;
+    const before = { att: att.soldiers + (counter ? counter.killed : 0), def: def.soldiers + hit.killed };
+    dA.shown = before.att; dD.shown = before.def;
+    if (def.x !== att.x) dA.facing = def.x > att.x ? 1 : -1;
+    if (!ranged && def.x !== att.x) dD.facing = att.x > def.x ? 1 : -1;
     const showClash = cutMode() !== 'off' && (!ranged || cutMode() === 'full');
+    const a = px(att.x, att.y), bb = px(def.x, def.y);
+    const mounted = MOUNTED.has(att.type) || att.type === 'wyvern';
+    const act = attackAct(att.type);
     if (showClash) {
+      // a short wind-up on the board, then the clash scene
+      dA.act = { name: act, t0: view.now, len: 380 };
       if (Math.random() < 0.35 || routed) showBark(att, 'attack');
-      await clashCutin(att, def, hit, counter);
-    } else if (!ranged) clashSfx(att.type);
-    else sfx.play('hit');
-    // board impact
-    dD.flash = 1; view.shake = Math.max(view.shake, ranged ? 4 : 6);
-    const pD = px(def.x, def.y);
-    spawn(16, () => { const a = Math.random() * 6.28, v = 60 + Math.random() * 160; return { x: pD.x, y: pD.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.5, max: 0.5, size: 2, color: ranged ? '#f0e0c0' : '#ffd080', grav: 300, add: true }; });
-    dustAt(def.x, def.y, 4);
-    floatText(def.x, def.y, '-' + hit.killed, '#ff6a50', true);
-    if (counter) { dA.flash = 0.8; floatText(att.x, att.y, '-' + counter.killed, '#ff9a70'); }
-    if (dA.lunge) { await tween(160, k => { dA.lunge.p = 0.5 + k * 0.5; }); dA.lunge = null; }
-    await tween(220, k => { dD.flash = 1 - k; dA.flash = Math.min(dA.flash, 1 - k); });
-    // last stand: a ruler's unit falls below 30%
+      await wait(260);
+      await clashCutin(att, def, hit, counter, before);
+      dA.act = null;
+      boardImpact(att, def, hit, dD, ranged, mounted ? 0.9 : 0.5);
+      if (counter) { dA.shown = att.soldiers; dA.flash = 0.8; floatText(att.x, att.y, '-' + counter.killed, '#ff9a70'); }
+      await tween(240, k => { dD.flash = 1 - k; dA.flash = Math.min(dA.flash, 1 - k); });
+    } else if (ranged) {
+      // a volley on the board: draw, loose, arrows in flight, landing spread over the square
+      const engine = att.type === 'siege' || att.type === 'bombards';
+      const powder = POWDER.has(att.type);
+      dA.act = { name: engine ? 'loose' : 'draw', t0: view.now, len: engine ? 700 : 420, stagger: engine ? 0 : 40 };
+      await wait(engine ? 280 : 400);
+      const lp = launchPoint(att.type, cs * 0.55, dA.facing);
+      const from = { x: a.x + lp.x, y: a.y + lp.y + cs * 0.24 };
+      let landed = 0, need = 1;
+      const onLand = () => { landed++; };
+      if (engine) {
+        sfx.play('catapult');
+        if (att.type === 'bombards') { view.P.flash(from.x, from.y, 0.9, [255, 220, 150]); view.P.smoke(from.x, from.y, 6, 0.6, 150, 0); shakeBy(6); }
+        view.projectiles.push({ a: from, b: { x: bb.x, y: bb.y }, t0: view.now, dur: (att.type === 'siege' ? 720 : 300) / speed(), kind: att.type === 'siege' ? 'stone' : 'ball',
+          arc: att.type === 'siege' ? cs * 2.6 + Math.abs(bb.x - a.x) * 0.15 : cs * 0.3, onLand });
+      } else {
+        sfx.play(powder ? 'catapult' : 'arrows');
+        const n = clamp(Math.round(att.soldiers / 18), 6, 14);
+        need = n;
+        for (let i = 0; i < n; i++) {
+          const jit = { x: (Math.random() - 0.5) * cs * 0.8, y: (Math.random() - 0.5) * cs * 0.6 };
+          const t0 = view.now + i * (powder ? 25 : 35) / speed();
+          if (powder) setTimeout(() => { view.P.flash(from.x + (Math.random() - 0.5) * cs * 0.3, from.y, 0.3, [255, 220, 150]); view.P.smoke(from.x, from.y, 1, 0.3, 160, 0); }, i * 25 / speed());
+          view.projectiles.push({ a: { x: from.x + (Math.random() - 0.5) * cs * 0.3, y: from.y }, b: { x: bb.x + jit.x, y: bb.y + jit.y }, t0,
+            dur: (powder ? 160 : 460 + Math.random() * 80) / speed(), kind: powder ? 'bullet' : att.type === 'druids' ? 'thorn' : att.type === 'bandits' ? 'bolt' : 'arrow',
+            arc: powder ? 2 : cs * (0.9 + Math.random() * 0.5) + Math.abs(bb.x - a.x) * 0.1,
+            onLand: q => { landed++; view.P.hit(q.b.x, q.b.y, [230, 215, 180]); } });
+        }
+      }
+      for (let guard = 0; landed < need && view.alive && guard < 120; guard++) await wait(30);
+      if (engine) { view.P.explode(bb.x, bb.y, att.type === 'siege' ? 1.1 : 0.9); hitStop(90); pulse(0.4, '255,140,60'); sfx.play('hit'); }
+      else sfx.play('hit');
+      dA.act = null;
+      boardImpact(att, def, hit, dD, true, 0.5);
+      await tween(220, k => { dD.flash = 1 - k; });
+    } else {
+      // melee on the board: charge into contact, weapons swing, the defender recoils
+      const reach = mounted ? 0.55 : isSpirit(att) ? 0.5 : 0.36;
+      dA.lunge = { p: 0, dx: Math.sign(def.x - att.x), dy: Math.sign(def.y - att.y), reach };
+      dA.act = { name: act, t0: view.now + 80, len: 420, stagger: 45 };
+      if (mounted) sfx.play('hooves');
+      dA.walking = true; dA.run = mounted;
+      await tween(mounted ? 260 : 220, k => {
+        dA.lunge.p = k * 0.5; dA.walkPh += 0.25;
+        if (mounted && Math.random() < 0.7) { const p = px(lerp(att.x, def.x, k * 0.5), lerp(att.y, def.y, k * 0.5)); view.P.dust(p.x - dA.facing * cs * 0.3, p.y + cs * 0.3, 1, [175, 155, 120], 0.25); }
+      });
+      dA.walking = false;
+      clashSfx(att.type);
+      if (isSpirit(att)) { const sp = SPIRITS[att.type]; view.P.explode(bb.x, bb.y, 0.8, sp.color); pulse(0.3, '200,200,255'); }
+      boardImpact(att, def, hit, dD, false, mounted ? 1 : 0.6);
+      if (mounted) { hitStop(80); view.P.ring(bb.x, bb.y + cs * 0.3, 0.9, [255, 230, 190], 3); }
+      await tween(mounted ? 220 : 180, k => { dA.lunge.p = 0.5 + k * 0.5; dD.flash = Math.max(0, 1 - k * 1.2); });
+      dA.lunge = null; dA.act = null;
+      if (counter) {   // the defender strikes back
+        await wait(80);
+        dD.lunge = { p: 0, dx: -Math.sign(def.x - att.x), dy: -Math.sign(def.y - att.y), reach: 0.28 };
+        dD.act = { name: attackAct(def.type) === 'draw' ? 'swing' : attackAct(def.type), t0: view.now, len: 380, stagger: 45 };
+        await tween(180, k => { dD.lunge.p = k * 0.5; });
+        sfx.play('clash');
+        dA.shown = att.soldiers; dA.flash = 0.9;
+        view.P.clash(a.x + Math.sign(def.x - att.x) * cs * 0.25, a.y - cs * 0.15, 0.45, [255, 180, 140]);
+        floatText(att.x, att.y, '-' + counter.killed, '#ff9a70');
+        shakeBy(4);
+        await tween(180, k => { dD.lunge.p = 0.5 + k * 0.5; dA.flash = 1 - k; });
+        dD.lunge = null; dD.act = null;
+      }
+    }
+    // last stand: a ruler's unit falls low
     for (const u of [def, att]) {
       if (!u.out && isRuler(u) && u.soldiers < u.start * 0.45 && !view.lastStand.has(u.id)) {
         view.lastStand.add(u.id);
@@ -1414,46 +1351,70 @@ export async function runBattle(container, input, opts = {}) {
   async function routUnit(u) {
     const d = view.disp.get(u.id);
     if (!d || d.alpha <= 0) return;
+    d.shown = u.soldiers;
     sfx.play('rout');
-    floatText(u.x, u.y, u.out === 'dead' ? 'Destroyed!' : 'Routed!', '#ffd27a', true);
+    const p = px(u.x, u.y);
+    const dead = u.out === 'dead';
+    view.P.unitBurst(p.x, p.y, isSpirit(u) ? SPIRITS[u.type].color : S[u.side].color, dead || isSpirit(u));
+    shakeBy(dead ? 9 : 6);
+    const last = !liveUnits(b, u.side).length;
+    if (last || isRuler(u)) slowMo(700);
+    floatText(u.x, u.y, dead ? 'Destroyed!' : isSpirit(u) ? 'Banished!' : 'Routed!', '#ffd27a', true);
     showBark(u, 'rout');
-    const anyLeft = liveUnits(b, u.side).length;
-    if (cutMode() === 'full' && (isRuler(u) || u.start >= 150 || !anyLeft)) {
-      await momentCutin(BATTLE_MOMENT.rout, u.out === 'dead' ? 'Destroyed' : 'Routed', `${unitName(u)} breaks and flees the field.`, '#ffc070');
+    if (cutMode() === 'full' && (isRuler(u) || u.start >= 150 || last)) {
+      await momentCutin(BATTLE_MOMENT.rout, dead ? 'Destroyed' : isSpirit(u) ? 'Banished' : 'Routed', `${unitName(u)} breaks and flees the field.`, '#ffc070');
     }
-    const fx = u.side === 'attacker' ? -1 : 1;
+    // survivors turn and run for their own edge
+    const away = u.side === 'attacker' ? -1 : 1;
+    d.facing = away; d.flee = !dead && !isSpirit(u) && u.soldiers > 0;
     const sx = d.x;
-    await tween(500, k => { d.alpha = 1 - k; d.x = sx + fx * k * 0.6; });
-    d.alpha = 0;
+    await tween(d.flee ? 900 : 500, k => {
+      d.alpha = 1 - k * k; d.x = sx + away * k * (d.flee ? 1.6 : 0.4); d.walkPh += 0.35;
+      if (d.flee && Math.random() < 0.4) dustAt(d.x, d.y, 1);
+    });
+    d.alpha = 0; d.flee = false;
     if (view.sel === u.id) view.sel = null;
   }
 
-  async function spellSequence(e) {
+  async function spellSequence(e, rest = []) {
     const sp = SPIRITS[e.spirit];
+    const caster = e.caster ? getUnit(b, e.caster) : spiritOf(b, e.side);
+    if (caster) {   // the spirit rears up
+      const d = view.disp.get(caster.id);
+      d.flash = 1; tween(500, k => { d.flash = 1 - k; });
+      const p = px(caster.x, caster.y); view.P.flash(p.x, p.y, 1.2, sp.color); view.P.embers(p.x, p.y, 16, sp.color, 1);
+    }
     if (cutMode() === 'full') await momentCutin(SPIRIT_CUTIN[e.spirit], sp.spell, `${sp.name} unleashes its power`, sp.color);
-    else { sfx.play('spell'); }
+    else sfx.play('spell');
     showBanner(`${sp.name}: ${sp.spell}`, e.side);
-    view.fx = { t0: view.now, dur: 1400 / speed(), cells: e.cells, spirit: e.spirit, bolts: e.spirit === 'gale' };
-    view.shake = 8;
-    // element particles
-    for (const c of e.cells) {
-      const p = px(c.x, c.y), cs = view.cs;
-      if (e.spirit === 'ember') spawn(14, () => ({ x: p.x + (Math.random() - 0.5) * cs, y: p.y + cs * 0.3, vx: (Math.random() - 0.5) * 30, vy: -80 - Math.random() * 120, life: 1 + Math.random() * 0.6, max: 1.6, size: 2 + Math.random() * 2.5, color: Math.random() < 0.5 ? '#ffb040' : '#ff5a20', add: true }));
-      else if (e.spirit === 'tide') spawn(12, () => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2; const v = 80 + Math.random() * 140; return { x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.9, max: 0.9, size: 2 + Math.random() * 2, color: '#a8dcff', grav: 400, add: true }; });
-      else if (e.spirit === 'gale') { spawn(10, () => { const a = Math.random() * 6.28, v = 100 + Math.random() * 200; return { x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.4, max: 0.4, size: 2, color: '#e8f0ff', add: true }; }); }
-      else if (e.spirit === 'stone') spawn(10, () => ({ x: p.x + (Math.random() - 0.5) * cs, y: p.y + cs * 0.3, vx: (Math.random() - 0.5) * 80, vy: -120 - Math.random() * 100, life: 0.9, max: 0.9, size: 3 + Math.random() * 4, color: '#8a7050', grav: 500, kind: 'rock' }));
-      else if (e.spirit === 'dusk') spawn(5, () => ({ x: p.x + (Math.random() - 0.5) * cs, y: p.y + (Math.random() - 0.5) * cs, vx: (Math.random() - 0.5) * 20, vy: -10, life: 1.6, max: 1.6, size: cs * 0.5, color: 'rgba(150,100,255,0.45)', kind: 'puff' }));
+    const anim = new SpellAnim({ ...e, casterAt: caster ? { x: caster.x, y: caster.y } : null }, {
+      px, cs: view.cs, P: view.P, shake: v => shakeBy(v), sfx: n => sfx.play(n),
+      whiteout: (a, rgb) => { view.whiteout = Math.max(view.whiteout, a); view.whiteCol = rgb.join(','); },
+      board: { x: view.ox, y: view.oy, w: view.cs * W, h: view.cs * H },
+    });
+    const dur = anim.dur;
+    // Bulwark: the new wall squares rise one after another
+    if (sp.shape === 'wall') {
+      e.cells.forEach((c, i) => { const w = b.tempWalls.find(w2 => w2.x === c.x && w2.y === c.y); if (w) w.born = view.now + anim.wallRiseAt(i) * dur / speed(); });
     }
-    if (e.spirit === 'gale') { sfx.play('hit'); sfx.play('gate', { delay: 0.1 }); }
-    await wait(700);
-    for (const h of e.hits) {
+    const hits = e.hits.map(h => {
       const u = getUnit(b, h.unit);
-      if (h.killed) floatText(u.x, u.y, '-' + h.killed, sp.color, true);
-      else floatText(u.x, u.y, sp.spell, sp.color);
-      view.disp.get(u.id).flash = 1;
-    }
-    await tween(400, k => { for (const h of e.hits) view.disp.get(h.unit).flash = 1 - k; });
-    await wait(300);
+      return { h, u, k: anim.hitK({ x: u.x, y: u.y }), done: false };
+    });
+    const routs = new Set(rest.filter(r => r.t === 'rout').map(r => r.unit));
+    view.spell = { anim, t0: view.now, dur: dur / speed() };
+    await tween(dur, k => {
+      for (const it of hits) if (!it.done && k >= it.k) {
+        it.done = true;
+        const d = view.disp.get(it.u.id);
+        d.flash = 1; if (it.h.killed) { d.shown = Math.max(it.u.soldiers, d.shown - it.h.killed); floatText(it.u.x, it.u.y, '-' + it.h.killed, sp.color, true); }
+        else floatText(it.u.x, it.u.y, sp.spell, sp.color);
+        tween(400, kk => { d.flash = 1 - kk; });
+        if (routs.has(it.u.id)) d.shown = it.u.soldiers;
+      }
+    });
+    view.spell = null;
+    await wait(150);
   }
 
   // ---------------------------------------------------------------- flow
@@ -1616,34 +1577,66 @@ export async function runBattle(container, input, opts = {}) {
 
   // ---------------------------------------------------------------- render loop
   let last = performance.now();
+  view.now = last;
+  const forestCells = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (b.grid[y * W + x] === 'forest') forestCells.push({ x, y });
+  let frameMs = 16.7;
   function frame(ts) {
     if (!view.alive) return;
-    const dt = Math.min(0.05, (ts - last) / 1000); last = ts;
-    view.now = ts;
+    const real = Math.min(0.05, (ts - last) / 1000); last = ts;
+    frameMs = frameMs * 0.95 + real * 1000 * 0.05;
+    view.frameMs = frameMs;
+    // virtual clock: hit-stop freezes, slow motion slows the board (not the cut-ins)
+    const ts2 = performance.now();
+    const scale = ts2 < view.hitStopUntil ? 0.04 : ts2 < view.slowUntil ? 0.35 : 1;
+    const dt = real * scale;
+    view.now += dt * 1000;
+    const now = view.now;
     // tweens
     for (let i = view.tweens.length - 1; i >= 0; i--) {
       const tw = view.tweens[i];
-      const k = clamp((ts - tw.t0) / tw.dur, 0, 1);
+      const k = clamp((now - tw.t0) / tw.dur, 0, 1);
       tw.fn(k);
       if (k >= 1) { view.tweens.splice(i, 1); tw.res(); }
     }
+    // ambient: leaves drifting off the woods, snow puffs
+    if (forestCells.length && Math.random() < dt * 1.2 && !view.reduced) {
+      const c = forestCells[(Math.random() * forestCells.length) | 0], p = px(c.x, c.y);
+      view.P.leaves(p.x, p.y - view.cs * 0.3, 1);
+    }
+    view.P.step(dt);
     g.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     g.clearRect(0, 0, view.w, view.h);
     drawBackdrop();
     g.save();
-    if (view.shake > 0.2) { g.translate((Math.random() - 0.5) * view.shake, (Math.random() - 0.5) * view.shake); view.shake *= Math.pow(0.02, dt); } else view.shake = 0;
+    if (view.shake > 0.2) { g.translate((Math.random() - 0.5) * view.shake, (Math.random() - 0.5) * view.shake); view.shake *= Math.pow(0.015, real); } else view.shake = 0;
     drawFrame();
     drawTempWalls();
     drawOverlays();
+    const spellK = view.spell ? clamp((now - view.spell.t0) / view.spell.dur, 0, 1) : 0;
+    if (view.spell && view.spell.anim.id === 'gale') view.spell.anim.draw(g, spellK, now / 1000);   // the dark sky goes under the units
     const order = b.units.slice().sort((p, q) => (view.disp.get(p.id).y - view.disp.get(q.id).y));
     for (const u of order) drawUnit(u, view.disp.get(u.id));
     drawSpellFx();
+    if (view.spell) { view.spell.anim.update(spellK, dt); if (view.spell.anim.id !== 'gale') view.spell.anim.draw(g, spellK, now / 1000); }
     drawProjectiles();
     drawParticles(dt);
+    view.P.draw(g);
     drawFloats(dt);
     g.restore();
+    // lighting pass by weather and season
+    const light = b.weather === 'rain' ? 'rgba(30,45,80,0.16)' : b.weather === 'fog' ? 'rgba(150,160,155,0.1)' : b.weather === 'snow' ? 'rgba(235,242,255,0.07)' : b.season === 2 ? 'rgba(255,150,60,0.05)' : null;
+    if (light) { g.save(); g.globalCompositeOperation = b.weather === 'snow' ? 'screen' : 'soft-light'; g.fillStyle = light; g.fillRect(0, 0, view.w, view.h); g.restore(); }
     drawWeather(dt);
-    drawCutin(dt);
+    // screen-edge vignette pulse on big hits, white flashes from spells
+    if (view.pulse > 0.01) {
+      const vg = g.createRadialGradient(view.w / 2, view.h / 2, Math.min(view.w, view.h) * 0.3, view.w / 2, view.h / 2, Math.max(view.w, view.h) * 0.7);
+      vg.addColorStop(0, `rgba(${view.pulseCol},0)`); vg.addColorStop(1, `rgba(${view.pulseCol},${view.pulse})`);
+      g.fillStyle = vg; g.fillRect(0, 0, view.w, view.h);
+      view.pulse *= Math.pow(0.02, real);
+    }
+    if (view.whiteout > 0.01) { g.fillStyle = `rgba(${view.whiteCol},${view.whiteout})`; g.fillRect(0, 0, view.w, view.h); view.whiteout *= Math.pow(0.004, real); }
+    drawCutin(real);
     requestAnimationFrame(frame);
   }
 
@@ -1655,6 +1648,7 @@ export async function runBattle(container, input, opts = {}) {
 
   // ---------------------------------------------------------------- intro
   layout();
+  if (opts.debug) opts.debug({ b, view, act, play, px });   // test hook (tests/out pages only)
   buildRosters();
   spiritIcon();
   updateHud();

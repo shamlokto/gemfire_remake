@@ -16,6 +16,10 @@
 //   autoPlayer: bool   if true the AI also plays the player's house (tests, demo mode)
 //   defeated: bool     the player's house has been eliminated (game over)
 //   vassal.marching    true while the vassal is part of a queued march (location is null then)
+//   scenario           scenario id (js/data/scenarios.js); startYear: the scenario's first year
+//   houses[id].tech    research (js/realm/tech.js); houses[id].charge: shard charge per spirit
+//   vassal.status      'active' | 'captive' | 'exiled' | 'dead' | 'wandering' (house null, at
+//                      `location`, invitable) | 'future' (an heir not yet of age; dueTurn)
 // March = { house, from, to, units: [Unit], vassals: [vassalId],
 //           fifth: null | { kind: 'company', type, soldiers } | { kind: 'spirit', id }, food }
 
@@ -23,8 +27,10 @@ import {
   PROVINCES, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, START_YEAR, seasonOf, ADJACENCY, VICTORY_PROVINCES as VP,
 } from '../data/world.js';
 import { HOUSES, HOUSE_START, HOUSE_BY_ID } from '../data/houses.js';
-import { VASSALS, VASSAL_BY_ID } from '../data/vassals.js';
-import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY } from '../data/units.js';
+import { VASSALS, VASSAL_BY_ID, WANDERERS, HEIRS } from '../data/vassals.js';
+import { SCENARIO_BY_ID } from '../data/scenarios.js';
+import { techState, shardCharge, setCharge, CHARGE_MAX } from './tech.js';
+import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY, MAX_UNITS_PER_PROVINCE, MAX_SOLDIERS } from '../data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { STORY } from '../data/events.js';
 import { makeRng } from '../rng.js';
@@ -52,11 +58,13 @@ function splitMilitia(rng, total) {
   return out;
 }
 
-export function newGame(player, seed = 1) {
+export function newGame(player, seed = 1, scenarioId = 'eclipse') {
   if (!HOUSE_BY_ID[player]) throw new Error('unknown house ' + player);
+  const sc = SCENARIO_BY_ID[scenarioId] || SCENARIO_BY_ID.eclipse;
   const rng = makeRng(seed >>> 0);
   const owner = {};
-  for (const h of HOUSES) for (const p of h.provinces) owner[p] = h.id;
+  const lands = h => sc.owners?.[h.id] || h.provinces;
+  for (const h of HOUSES) for (const p of lands(h)) owner[p] = h.id;
 
   const provinces = PROVINCES.map(p => {
     const o = owner[p.id] ?? null;
@@ -72,17 +80,19 @@ export function newGame(player, seed = 1) {
   });
   // Non-capital starting provinces get a little less.
   for (const h of HOUSES) {
-    for (const pid of h.provinces) if (pid !== h.capital) {
+    const gm = sc.goldMult?.[h.id] ?? 1;
+    for (const pid of lands(h)) {
       const pr = provinces[pid];
-      pr.food = Math.round(pr.food * 0.6); pr.gold = Math.round(pr.gold * 0.6);
+      const f = (pid !== h.capital ? 0.6 : 1) * gm;
+      pr.food = Math.round(pr.food * f); pr.gold = Math.round(pr.gold * f);
     }
     if (h.shard) provinces[h.capital].shard = h.shard;
   }
 
   const state = {
     version: STATE_VERSION, seed: seed >>> 0, rng: 0,
-    turn: 0, year: START_YEAR, month: 0,
-    player,
+    turn: 0, year: sc.year || START_YEAR, month: 0, startYear: sc.year || START_YEAR,
+    scenario: sc.id, player,
     houses: {}, provinces, vassals: {},
     truces: {}, marriages: [], intel: {},
     log: [{ turn: 0, text: `${HOUSE_BY_ID[player].name} takes up the struggle for Varenhold.`, kind: 'story' }],
@@ -91,23 +101,60 @@ export function newGame(player, seed = 1) {
     winner: null, nextUid: 0,
   };
 
+  const scale = sc.scale || 1;
+  const sized = n => Math.min(MAX_SOLDIERS, Math.round(n * scale / 10) * 10);
   for (const v of VASSALS) {
     state.vassals[v.id] = {
       id: v.id, house: v.house, might: v.might, wits: v.wits, charm: v.charm, loyalty: v.loyalty,
       location: v.at, status: 'active', captor: null, marching: false,
     };
     provinces[v.at].vassals.push(v.id);
-    provinces[v.at].units.push({ uid: newUid(state), type: v.troop, soldiers: v.soldiers, training: START_TRAINING, leader: v.id });
+    provinces[v.at].units.push({ uid: newUid(state), type: v.troop, soldiers: sized(v.soldiers), training: START_TRAINING, leader: v.id });
   }
   for (const h of HOUSES) {
-    state.houses[h.id] = { id: h.id, alive: true, ruler: h.ruler, capital: h.capital, spiritUsed: {} };
+    state.houses[h.id] = { id: h.id, alive: true, ruler: h.ruler, capital: h.capital, spiritUsed: {},
+      tech: { researched: [], progress: {}, focus: null }, charge: {} };
     state.intel[h.id] = {};
     for (let i = 0; i < CAPITAL_LEVY.units; i++) {
-      provinces[h.capital].units.push({ uid: newUid(state), type: CAPITAL_LEVY.type, soldiers: CAPITAL_LEVY.soldiers, training: 30, leader: null });
+      provinces[h.capital].units.push({ uid: newUid(state), type: CAPITAL_LEVY.type, soldiers: sized(CAPITAL_LEVY.soldiers), training: 30, leader: null });
     }
+    // Scenario: garrisons for extra lands, starting techs, shard charge.
+    for (const pid of lands(h)) {
+      if (h.provinces.includes(pid) || !sc.garrison) continue;
+      for (const [type, n] of sc.garrison) {
+        if (provinces[pid].units.length >= MAX_UNITS_PER_PROVINCE) break;
+        provinces[pid].units.push({ uid: newUid(state), type, soldiers: sized(n), training: 45, leader: null });
+      }
+    }
+    for (const t of sc.techs?.[h.id] || []) techState(state, h.id).researched.push(t);
+    if (h.shard) setCharge(state, h.id, h.shard, sc.charge ?? CHARGE_MAX);
+  }
+  for (const [a, b, months] of sc.truces || []) state.truces[pairKey(a, b)] = months;
+  for (const [a, b, months] of sc.marriages || []) state.marriages.push([a, b, months]);
+  // Wanderers roam the land; heirs wait to come of age.
+  for (const w of WANDERERS) {
+    state.vassals[w.id] = { id: w.id, house: null, might: w.might, wits: w.wits, charm: w.charm, loyalty: w.loyalty,
+      location: w.at, status: 'wandering', captor: null, marching: false, troop: w.troop, band: w.soldiers };
+  }
+  for (const hh of HEIRS) {
+    state.vassals[hh.id] = { id: hh.id, house: hh.house, might: hh.might, wits: hh.wits, charm: hh.charm, loyalty: hh.loyalty,
+      location: null, status: 'future', captor: null, marching: false, troop: hh.troop, band: hh.soldiers, dueTurn: hh.years * 12 };
+  }
+  if (sc.id !== 'eclipse') {
+    state.log.push({ turn: 0, text: `Scenario: ${sc.name}, year ${state.year}.`, kind: 'story' });
+    state.pendingEvents.push({ art: sc.art, title: sc.name, text: sc.blurb });
   }
   state.rng = rng.state;
   return state;
+}
+
+// Wanderers in (or invitable from) a province: those standing in it or in a neighbour.
+export function wanderersAt(state, pid) {
+  return Object.values(state.vassals).filter(v => v.status === 'wandering' && v.location === pid);
+}
+export function wanderersNear(state, pid) {
+  const near = new Set([pid, ...ADJACENCY[pid]]);
+  return Object.values(state.vassals).filter(v => v.status === 'wandering' && near.has(v.location));
 }
 
 // ---------- RNG helper: use the state's rng and write it back ----------
@@ -155,14 +202,12 @@ export function isRuler(state, vid) {
   return !!v && state.houses[v.house] && state.houses[v.house].ruler === vid;
 }
 
-// A spirit the house can summon this season (holds the shard, not used this season, not already
-// marching in another queued attack). `exceptQueued` false ignores queued marches.
+// A spirit the house can summon now: it holds the shard, the shard is fully charged, and the
+// spirit is not already marching in another queued attack. `exceptQueued` false ignores marches.
 export function availableSpirit(state, house, exceptQueued = true) {
   if (!house || !state.houses[house]) return null;
-  const si = seasonIndex(state);
-  const used = state.houses[house].spiritUsed;
   const queued = exceptQueued ? new Set(state.marches.filter(m => m.house === house && m.fifth?.kind === 'spirit').map(m => m.fifth.id)) : new Set();
-  return shardsOf(state, house).find(s => used[s] !== si && !queued.has(s)) || null;
+  return shardsOf(state, house).find(s => shardCharge(state, house, s) >= CHARGE_MAX && !queued.has(s)) || null;
 }
 
 // Governor of a province: the ruler if present, else the vassal with the best charm.

@@ -53,7 +53,7 @@ test('attacker wins a free hold: province, units and vassals move; spirit is spe
   assert.ok(s.provinces[13].units.some(x => x.uid === u.uid && x.leader === 'aldmere_1'));
   assert.deepEqual(s.provinces[13].militia, []);
   assert.ok(sum.battles.some(b => b.march.to === 13));
-  assert.notEqual(s.houses.aldmere.spiritUsed.tide, undefined);
+  assert.ok(s.houses.aldmere.charge.tide < 100, 'the summon spent the shard charge');
 });
 
 test('defender wins: attackers return home with their surviving units', async () => {

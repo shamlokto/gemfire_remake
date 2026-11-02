@@ -53,16 +53,19 @@ const KIT = {
   militia:  { helm: 'straw', weapon: 'fork', shield: null, armour: 'cloth' },
   bandits:  { helm: 'cowl', weapon: 'crossbow', shield: null, armour: 'leather', mask: true },
   druids:   { helm: 'leafhood', weapon: 'staff', shield: null, armour: 'robe' },
+  arquebusiers: { helm: 'kettle', weapon: 'gun', shield: null, armour: 'leather' },
 };
 export const MOUNTED = new Set(['horse', 'knights', 'wolfriders', 'ghosts']);
-export const RANGED = new Set(['archers', 'bandits', 'druids', 'siege']);
+export const RANGED = new Set(['archers', 'bandits', 'druids', 'siege', 'arquebusiers', 'bombards']);
+export const POWDER = new Set(['arquebusiers', 'bombards']);
 
 // Default attack act for a type.
 export function attackAct(type) {
   if (type === 'pikes' || type === 'militia' || type === 'knights') return 'thrust';
   if (type === 'archers' || type === 'bandits') return 'draw';
   if (type === 'druids') return 'cast';
-  if (type === 'siege') return 'loose';
+  if (type === 'siege' || type === 'bombards') return 'loose';
+  if (type === 'arquebusiers') return 'draw';
   return 'swing';
 }
 
@@ -91,8 +94,9 @@ function armPose(weapon, act, k, t) {
   const breathe = Math.sin(t * 2.1) * 0.05;
   let th = 0.55 + breathe, wa = -1.25, push = 0, back = 0.2, glow = 0;
   if (weapon === 'pike' || weapon === 'fork') { th = 0.35; wa = -1.45 + breathe * 0.3; }
-  if (weapon === 'bow') { th = 0.35; wa = -1.5; }
+  if (weapon === 'bow') { th = 0.3; wa = 0.2; }
   if (weapon === 'crossbow') { th = 1.2; wa = -0.15; back = 0.9; }
+  if (weapon === 'gun') { th = 0.4; wa = -1.35; back = 0.3; }
   if (weapon === 'staff') { th = 0.4; wa = -1.5; }
   if (weapon === 'lance') { th = 1.3; wa = -0.12; }
   if (act === 'swing') {
@@ -105,6 +109,8 @@ function armPose(weapon, act, k, t) {
     else if (k < 0.52) push = lerp(-0.14, 0.26, easeOut((k - 0.35) / 0.17));
     else push = lerp(0.26, 0, ease((k - 0.52) / 0.48));
     back = 0.9;
+  } else if ((act === 'draw' || act === 'loose') && weapon === 'gun') {
+    th = 1.45; wa = -0.06; back = 1.25; push = act === 'loose' && k < 0.3 ? -0.08 * (1 - k / 0.3) : 0;
   } else if (act === 'draw' || act === 'loose') {
     if (weapon === 'crossbow') { th = 1.45; wa = -0.12; back = 1.2; push = act === 'loose' && k > 0.5 ? -0.06 * (1 - (k - 0.5) * 2) : 0; }
     else { th = 1.5; wa = -0.45; back = act === 'draw' ? lerp(0.6, 1.9, ease(k)) : (k < 0.15 ? 1.9 : 0.8); }
@@ -295,6 +301,13 @@ function drawWeapon(g, w, hx, hy, wa, s, P, act, k, ap, opts) {
     const ex = hx + dx * s * 0.2, ey = hy + dy * s * 0.2;
     g.strokeStyle = P.steelD; g.lineWidth = Math.max(1, s * 0.025);
     g.beginPath(); g.moveTo(ex - dy * s * 0.12, ey + dx * s * 0.12); g.quadraticCurveTo(ex + dx * s * 0.04, ey + dy * s * 0.04, ex + dy * s * 0.12, ey - dx * s * 0.12); g.stroke();
+  } else if (w === 'gun') {
+    g.strokeStyle = ink; g.lineWidth = Math.max(2.2, s * 0.055);
+    g.beginPath(); g.moveTo(hx - dx * s * 0.16, hy - dy * s * 0.16); g.lineTo(hx + dx * s * 0.42, hy + dy * s * 0.42); g.stroke();
+    g.strokeStyle = P.wood; g.lineWidth = Math.max(1.2, s * 0.035);
+    g.beginPath(); g.moveTo(hx - dx * s * 0.16, hy - dy * s * 0.16); g.lineTo(hx + dx * s * 0.1, hy + dy * s * 0.1); g.stroke();
+    g.strokeStyle = '#4a4e56'; g.lineWidth = Math.max(1, s * 0.025);
+    g.beginPath(); g.moveTo(hx + dx * s * 0.08, hy + dy * s * 0.08); g.lineTo(hx + dx * s * 0.42, hy + dy * s * 0.42); g.stroke();
   } else if (w === 'staff') {
     const L = s * 0.7;
     g.strokeStyle = ink; g.lineWidth = Math.max(2, s * 0.045);
@@ -433,6 +446,25 @@ function catapult(g, s, P, pose) {
   g.fillStyle = P.col; g.beginPath(); g.moveTo(-W * 0.45, -s * 0.18); g.lineTo(-W * 0.45, -s * 0.5); g.lineTo(-W * 0.3 + Math.sin(t * 4) * s * 0.02, -s * 0.44); g.lineTo(-W * 0.45, -s * 0.38); g.fill();
 }
 
+function bombard(g, s, P, pose) {
+  const ink = P.ink, t = pose.t || 0, act = pose.act, k = pose.k ?? 0;
+  const recoil = act === 'loose' && k > 0.35 ? Math.max(0, 1 - (k - 0.35) * 3) * s * 0.12 : 0;
+  g.save(); g.translate(-s * 0.7, 0); person(g, s * 0.78, P, KIT.militia, { t, act: 'idle', walk: pose.walk }); g.restore();
+  g.save(); g.translate(-recoil, 0);
+  // cradle and barrel
+  g.fillStyle = P.woodD; g.strokeStyle = ink; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(-s * 0.4, -s * 0.12); g.lineTo(s * 0.25, -s * 0.12); g.lineTo(s * 0.15, -s * 0.3); g.lineTo(-s * 0.35, -s * 0.28); g.closePath(); g.fill(); g.stroke();
+  g.save(); g.translate(-s * 0.05, -s * 0.34); g.rotate(-0.12);
+  const bg = g.createLinearGradient(0, -s * 0.1, 0, s * 0.1); bg.addColorStop(0, '#8a8e96'); bg.addColorStop(0.5, '#4a4e56'); bg.addColorStop(1, '#22252a');
+  g.fillStyle = bg; g.beginPath(); g.roundRect(-s * 0.35, -s * 0.1, s * 0.75, s * 0.2, s * 0.05); g.fill(); g.stroke();
+  g.fillStyle = '#1a1c20'; g.beginPath(); g.ellipse(s * 0.4, 0, s * 0.03, s * 0.08, 0, 0, TAU); g.fill();
+  g.fillStyle = P.col; g.fillRect(-s * 0.2, -s * 0.1, s * 0.06, s * 0.2); g.fillRect(s * 0.15, -s * 0.1, s * 0.06, s * 0.2);
+  g.restore();
+  for (const wx of [-s * 0.25, s * 0.12]) { g.fillStyle = P.woodD; g.beginPath(); g.arc(wx, -s * 0.1, s * 0.1, 0, TAU); g.fill(); g.stroke(); }
+  g.restore();
+  void t;
+}
+
 function golem(g, s, P, pose) {
   const ink = P.ink, t = pose.t || 0, act = pose.act, k = pose.k ?? 0;
   const walking = pose.walk != null, ph = walking ? pose.walk * 0.7 : 0;
@@ -530,6 +562,7 @@ export function drawSoldier(g, type, x, y, s, P, facing, pose = {}) {
       break;
     }
     case 'siege': catapult(g, s, P, p2); break;
+    case 'bombards': bombard(g, s, P, p2); break;
     case 'golem': golem(g, s, P, p2); break;
     case 'wyvern': wyvern(g, s, P, p2); break;
     default: person(g, s, P, KIT[type] || KIT.footmen, p2);
@@ -540,13 +573,15 @@ export function drawSoldier(g, type, x, y, s, P, facing, pose = {}) {
 // Where a figure's weapon/launch point roughly is (for arrows and spells), relative to feet.
 export function launchPoint(type, s, facing) {
   if (type === 'siege') return { x: facing * s * 0.3, y: -s * 1.1 };
+  if (type === 'bombards') return { x: facing * s * 0.38, y: -s * 0.38 };
+  if (type === 'arquebusiers') return { x: facing * s * 0.62, y: -s * 0.72 };
   if (MOUNTED.has(type)) return { x: facing * s * 0.35, y: -s * 1.05 };
   return { x: facing * s * 0.22, y: -s * 0.68 };
 }
 
 // Figures per unit by strength and type.
 export function squadSize(type) {
-  return { golem: 1, wyvern: 1, siege: 2, horse: 4, knights: 3, wolfriders: 4, ghosts: 3 }[type] || 6;
+  return { golem: 1, wyvern: 1, siege: 2, bombards: 2, horse: 4, knights: 3, wolfriders: 4, ghosts: 3 }[type] || 6;
 }
 // Formation slots (cell units, x forward, y depth), front rank first.
 const FORMS = {

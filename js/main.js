@@ -5,6 +5,7 @@ import { SPIRITS } from './data/spirits.js';
 import { VASSAL_BY_ID } from './data/vassals.js';
 import { TROOPS, COMPANIES } from './data/units.js';
 import { STORY } from './data/events.js';
+import { SCENARIOS, SCENARIO_BY_ID } from './data/scenarios.js';
 import { art, loadArtManifest, ENDING, BATTLE_BACKDROP, ORDER_BACKDROP } from './data/art.js';
 import { newGame, ownedProvinces, houseTotals } from './realm/state.js';
 import { applyOrder } from './realm/orders.js';
@@ -163,7 +164,7 @@ function showSpyReport(r) {
 
 // ------------------------------------------------------------------ save / load
 function saveMeta(st) {
-  return { house: st.player, year: st.year, month: st.month, turn: st.turn, provinces: ownedProvinces(st, st.player).length, savedAt: Date.now() };
+  return { house: st.player, year: st.year, month: st.month, turn: st.turn, provinces: ownedProvinces(st, st.player).length, scenario: st.scenario || 'eclipse', savedAt: Date.now() };
 }
 function writeSave(key, st) {
   return store.set(key, JSON.stringify({ meta: saveMeta(st), state: st }));
@@ -178,7 +179,8 @@ function autosave() { if (app.state && !app.state.winner && !app.state.defeated)
 function slotLabel(meta) {
   if (!meta) return 'Empty';
   const hs = HOUSE_BY_ID[meta.house];
-  return `${hs ? hs.short : meta.house} · ${MONTHS[meta.month]} ${meta.year} · ${meta.provinces} provinces · ${new Date(meta.savedAt).toLocaleString()}`;
+  const sc = meta.scenario && meta.scenario !== 'eclipse' ? ` · ${SCENARIO_BY_ID[meta.scenario]?.name || meta.scenario}` : '';
+  return `${hs ? hs.short : meta.house}${sc} · ${MONTHS[meta.month]} ${meta.year} · ${meta.provinces} provinces · ${new Date(meta.savedAt).toLocaleString()}`;
 }
 
 function saveLoadDialog(mode) {
@@ -242,20 +244,43 @@ function buildTitle() {
       h('div.logo', 'Lanternfall'),
       h('div.tagline', 'Six houses. Five bound spirits. One shattered lantern.'),
       h('div.menu',
-        h('button.btn.primary.big', { onclick: () => { sfx('click'); buildSelect(); app.show('select'); playMusic('select'); } }, 'New Game'),
+        h('button.btn.primary.big', { onclick: () => { sfx('click'); buildScenarios(); app.show('scenario'); playMusic('select'); } }, 'New Game'),
         h('button.btn.big', { disabled: !hasAuto, onclick: () => { const s = readSave(AUTO_KEY); if (s) startGame(s.state); } }, 'Continue'),
         h('button.btn.big', { onclick: async () => { const s = await saveLoadDialog('load'); if (s) startGame(s); } }, 'Load'),
         h('button.btn.ghost', { onclick: () => openSettings() }, 'Sound settings'))),
     h('div.title-foot', h('a', { href: 'wiki.html' }, 'Wiki'), '·', h('span', 'An original game of the Varenhold realm')));
 }
 
-function buildSelect() {
+// Scenario select: New Game -> scenario -> house.
+function buildScenarios() {
+  const scr = app.screens.scenario;
+  scr.innerHTML = '';
+  const grid = h('div.scenario-grid');
+  for (const sc of SCENARIOS) {
+    const big = Object.entries(sc.owners || {}).sort((a, b) => b[1].length - a[1].length).slice(0, 3)
+      .map(([id, ps]) => h('span.chip', { style: { borderColor: HOUSE_BY_ID[id].color } }, HOUSE_BY_ID[id].short, ' ', h('b', ps.length)));
+    grid.append(h('button.scenario-card', { onclick: () => { sfx('click'); buildSelect(sc.id); app.show('select'); }, onmouseenter: () => sfx('hover') },
+      h('div.sc-art', { style: { backgroundImage: `url(${art(sc.art)})` } }, h('span.sc-year', `Year ${sc.year}`)),
+      h('div.sc-body',
+        h('h3', sc.name),
+        h('div.sc-diff', sc.difficulty || ''),
+        h('p.blurb', sc.blurb),
+        big.length ? h('div.facts', ...big) : null)));
+  }
+  scr.append(h('div.bgimg', { style: { backgroundImage: `url(${art(2)})` } }),
+    h('div.select-inner', h('h2', 'Choose a scenario'), h('p.sub', 'The same realm at different moments of the war.'), grid,
+      h('div.select-actions', h('button.btn', { onclick: () => toTitle() }, 'Back'))));
+}
+
+function buildSelect(scenarioId = 'eclipse') {
+  const sc = SCENARIO_BY_ID[scenarioId] || SCENARIOS[0];
   const scr = app.screens.select;
   scr.innerHTML = '';
   const grid = h('div.house-grid');
   for (const hs of HOUSES) {
     const shard = hs.shard ? SPIRITS[hs.shard] : null;
-    grid.append(h('button.house-card', { '--hc': hs.color, onclick: () => chooseHouse(hs.id), onmouseenter: () => sfx('hover') },
+    const lands = sc.owners?.[hs.id] || hs.provinces;
+    grid.append(h('button.house-card', { '--hc': hs.color, onclick: () => chooseHouse(hs.id, sc.id), onmouseenter: () => sfx('hover') },
       h('div', { style: { position: 'relative' } }, portrait(hs.ruler, { size: 120 }),
         h('div', { style: { position: 'absolute', right: '-8px', bottom: '-8px' } }, crestImg(hs.id, 44))),
       h('div',
@@ -264,18 +289,18 @@ function buildSelect() {
         h('p.blurb', hs.blurb),
         h('div.facts',
           h('span.chip', 'Seat ', h('b', PROVINCES[hs.capital].name)),
-          h('span.chip', 'Lands ', h('b', hs.provinces.map(p => PROVINCES[p].name).join(', '))),
+          h('span.chip', 'Lands ', h('b', lands.length > 3 ? `${lands.length} provinces` : lands.map(p => PROVINCES[p].name).join(', '))),
           h('span.chip', { style: shard ? { borderColor: shard.color } : {} }, shard ? ['◆ ', h('b', shard.name)] : 'No shard')))));
   }
   scr.append(h('div.bgimg', { style: { backgroundImage: `url(${art(2)})` } }),
-    h('div.select-inner', h('h2', 'Choose your house'), h('p.sub', 'Each house begins with two provinces and its own strengths.'), grid,
-      h('div.select-actions', h('button.btn', { onclick: () => toTitle() }, 'Back'))));
+    h('div.select-inner', h('h2', 'Choose your house'), h('p.sub', `${sc.name}, year ${sc.year}. ${sc.id === 'eclipse' ? 'Each house begins with two provinces and its own strengths.' : sc.difficulty}`), grid,
+      h('div.select-actions', h('button.btn', { onclick: () => { buildScenarios(); app.show('scenario'); } }, 'Back'))));
 }
 
-async function chooseHouse(id) {
+async function chooseHouse(id, scenarioId = 'eclipse') {
   sfx('click');
   const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
-  const st = newGame(id, seed);
+  const st = newGame(id, seed, scenarioId);
   startGame(st);
 }
 
@@ -310,7 +335,7 @@ function toTitle() {
 // ------------------------------------------------------------------ boot
 async function boot() {
   const root = document.getElementById('app');
-  for (const name of ['title', 'select', 'realm', 'battle', 'end']) {
+  for (const name of ['title', 'scenario', 'select', 'realm', 'battle', 'end']) {
     const el = h(`section.screen.${name}-screen`);
     root.append(el);
     app.screens[name] = el;
