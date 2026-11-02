@@ -13,7 +13,7 @@
 import {
   createBattle, applyAction, legalMoves, legalTargets, result, getUnit, unitAt, liveUnits,
   spellCells, canCast, spiritOf, routAt, sideDone, statsOf, terrainAt, enemyOf, W, H, OBJ, TERRAIN, MAX_ROUNDS,
-  moveRange, attackRange, expectedKills, DIR_NAMES,
+  moveRange, attackRange, expectedKills, DIR_NAMES, breathCells, canBreathe, dragonOf, DAWNWYRM,
 } from '../battle/rules.js';
 import { chooseAction } from '../battle/ai.js';
 import { bark } from '../battle/barks.js';
@@ -22,7 +22,9 @@ import { playSting } from './audio.js';
 import {
   art, hasArt, TERRAIN_TILE, CLASH_CUTIN, SPIRIT_CUTIN, BATTLE_MOMENT, WEATHER_FX, BATTLE_FRAME,
   BATTLE_BACKDROP, CREST, houseTroopSprite, CLASH_BACKDROP, BATTLE_MOMENT2, HOUSE_CHARGE, FX_ART, SPIRIT_SIGIL,
+  isoUnitSprite, ISO_OTHER, ISO_TERRAIN, ISO_PROP, FIGHTER, DRAGON_ART,
 } from '../data/art.js';
+import { IsoBoard, opaqueBox } from './battle-anim/isoboard.js';
 import { HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
 import { SPIRITS } from '../data/spirits.js';
@@ -256,12 +258,20 @@ export async function runBattle(container, input, opts = {}) {
   const province = PROVINCES[b.provinceId] || null;
   const vassalOf = u => (u.vassalId && VASSAL_BY_ID[u.vassalId]) || null;
   const isSpirit = u => u.kind === 'spirit';
-  const unitName = u => vassalOf(u)?.name || (isSpirit(u) ? SPIRITS[u.type].name : u.kind === 'militia' ? 'Militia' : statsOf(u.type).name);
+  const isDragon = u => u.kind === 'dragon';
+  const unitName = u => vassalOf(u)?.name || (isDragon(u) ? DAWNWYRM.name : isSpirit(u) ? SPIRITS[u.type].name : u.kind === 'militia' ? 'Militia' : statsOf(u.type).name);
   // Short role line: leader title, "Leaderless", "Hired company", "Summoned spirit".
-  const roleOf = u => isSpirit(u) ? 'Summoned spirit' : u.kind === 'company' ? 'Hired company' :
+  const roleOf = u => isDragon(u) ? 'Holy dragon of the Lantern' : isSpirit(u) ? 'Summoned spirit' : u.kind === 'company' ? 'Hired company' :
     u.kind === 'militia' ? 'Local militia' : vassalOf(u) ? vassalOf(u).title : 'Leaderless';
   const isRuler = u => u.ruler || (u.vassalId && b.houses[u.side] && HOUSE_BY_ID[b.houses[u.side]]?.ruler === u.vassalId);
-  const portraitSlot = u => isSpirit(u) ? SPIRITS[u.type].art : (vassalOf(u)?.portrait ?? null);
+  const portraitSlot = u => isDragon(u) ? DRAGON_ART.portrait : isSpirit(u) ? SPIRITS[u.type].art : (vassalOf(u)?.portrait ?? null);
+  // Painted isometric sprite of a unit on the board (null: draw the procedural squad).
+  const isoSlot = u => {
+    if (isDragon(u)) return DRAGON_ART.iso;
+    if (isSpirit(u)) return ISO_OTHER[u.type] ?? null;
+    if (u.kind === 'militia' || u.type === 'militia') return ISO_OTHER.militia;
+    return isoUnitSprite(b.houses[u.side], u.type) ?? ISO_OTHER[u.type] ?? null;
+  };
   const spriteSlot = u => {
     const hs = houseTroopSprite(b.houses[u.side], u.type);
     if (hs && hasArt(hs)) return { slot: hs, tint: false };
@@ -298,6 +308,8 @@ export async function runBattle(container, input, opts = {}) {
     ...Object.values(CLASH_BACKDROP).flatMap(o => Object.values(o)).filter(x => x != null), ...Object.values(BATTLE_MOMENT2), ...Object.values(FX_ART),
     HOUSE_CHARGE[b.houses.attacker], ...Object.values(SPIRIT_SIGIL)]);
   if (b.weather) want.add(WEATHER_FX[b.weather]);
+  for (const v of [...Object.values(ISO_TERRAIN), ...Object.values(ISO_PROP), ...Object.values(FIGHTER), ...Object.values(DRAGON_ART)]) want.add(v);
+  for (const u of b.units) want.add(isoSlot(u));
   for (const k of new Set(b.grid)) want.add(TERRAIN_TILE[k]);
   for (const u of b.units) { want.add(isSpirit(u) ? SPIRIT_CUTIN[u.type] : CLASH_CUTIN[u.type]); want.add(portraitSlot(u)); const s = spriteSlot(u); if (s) want.add(s.slot); }
   for (const side of ['attacker', 'defender']) if (b.spirit[side]) { want.add(SPIRIT_CUTIN[b.spirit[side]]); want.add(SPIRITS[b.spirit[side]].fx); want.add(SPIRITS[b.spirit[side]].art); }
@@ -320,6 +332,7 @@ export async function runBattle(container, input, opts = {}) {
     </div>
     <div class="bt-bar">
       <button class="bt-btn bt-spirit" hidden><canvas width="40" height="40"></canvas><span></span></button>
+      <button class="bt-btn bt-breath" hidden title="${DAWNWYRM.breath.text}">&#128293; ${DAWNWYRM.breath.name}</button>
       <button class="bt-btn bt-rotate" hidden title="Rotate (R)">&#8635; Rotate</button>
       <button class="bt-btn bt-hold" title="Hold this unit (H)">Hold</button>
       <button class="bt-btn bt-end bt-primary" title="End turn (E)">End Turn</button>
@@ -349,7 +362,12 @@ export async function runBattle(container, input, opts = {}) {
     banner: null, weatherT: 0,
     P: new Particles({ unit: 32, max: 700 }), reduced: reducedMotion(),
     hitStopUntil: 0, slowUntil: 0, pulse: 0, pulseCol: '200,40,30', spell: null, whiteout: 0, whiteCol: '255,250,235',
+    zoom: 1, panX: 0, panY: 0, breath: null,
   };
+  // The isometric board (js/ui/battle-anim/isoboard.js): raised tiles by elevation, props, picking.
+  const iso = new IsoBoard({ grid: b.grid, elev: b.elev || new Array(W * H).fill(0), W, H, season: b.season ?? 1,
+    artImg, ISO_TERRAIN, ISO_PROP, defColor: S.defender.color });
+  let props = iso.props();
   for (const u of b.units) view.disp.set(u.id, {
     x: u.x, y: u.y, alpha: u.out ? 0 : 1, flash: 0, phase: hash(u.x, u.y, 7) * 6.28, lunge: null,
     shown: u.soldiers, facing: u.side === 'attacker' ? 1 : -1, walking: false, walkPh: 0, act: null, recoil: null,
@@ -380,46 +398,26 @@ export async function runBattle(container, input, opts = {}) {
     view.w = Math.max(200, r.width); view.h = Math.max(160, r.height);
     canvas.width = Math.round(view.w * dpr); canvas.height = Math.round(view.h * dpr);
     canvas.style.width = view.w + 'px'; canvas.style.height = view.h + 'px';
-    const margin = Math.max(10, Math.min(view.w, view.h) * 0.035);
-    const cs = Math.floor(Math.min((view.w - margin * 2) / W, (view.h - margin * 2) / H));
-    view.cs = Math.max(12, cs);
-    view.ox = Math.round((view.w - view.cs * W) / 2); view.oy = Math.round((view.h - view.cs * H) / 2);
+    view.zoom = clamp(view.zoom, 0.7, 2.6);
+    iso.fit(view.w, view.h, view.zoom, 0, 0);
+    view.cs = Math.max(10, iso.a * 1.12);   // unit scale: a figure is about a tile wide
     view.P.unit = view.cs;
     buildStatic();
+    iso.fit(view.w, view.h, view.zoom, view.panX, view.panY);
     const ro = root.getBoundingClientRect();
     ocv.width = Math.round(ro.width * dpr); ocv.height = Math.round(ro.height * dpr);
     ocv.style.width = ro.width + 'px'; ocv.style.height = ro.height + 'px';
   }
 
   function buildStatic() {
-    const { cs, dpr } = view;
-    const c = document.createElement('canvas');
-    c.width = Math.round(cs * W * dpr); c.height = Math.round(cs * H * dpr);
-    const sg = c.getContext('2d'); sg.scale(dpr, dpr);
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const t = b.grid[y * W + x];
-      const im = artImg(TERRAIN_TILE[t]);
-      if (im && t !== 'keep') {
-        sg.drawImage(im, x * cs, y * cs, cs + 0.5, cs + 0.5);
-        if (b.season === 3) { sg.fillStyle = 'rgba(235,242,250,0.22)'; sg.fillRect(x * cs, y * cs, cs + 0.5, cs + 0.5); }
-      } else drawTerrainCell(sg, t, x * cs, y * cs, cs, x, y, b.season);
-    }
-    // soft grid
-    sg.strokeStyle = 'rgba(0,0,0,0.13)'; sg.lineWidth = 1;
-    for (let x = 1; x < W; x++) { sg.beginPath(); sg.moveTo(x * cs + 0.5, 0); sg.lineTo(x * cs + 0.5, H * cs); sg.stroke(); }
-    for (let y = 1; y < H; y++) { sg.beginPath(); sg.moveTo(0, y * cs + 0.5); sg.lineTo(W * cs, y * cs + 0.5); sg.stroke(); }
-    // keep banner
-    const kx = OBJ.x * cs + cs / 2, ky = OBJ.y * cs + cs / 2;
-    sg.strokeStyle = '#3a2a1a'; sg.lineWidth = Math.max(2, cs / 16); sg.beginPath(); sg.moveTo(kx, ky + cs * 0.3); sg.lineTo(kx, ky - cs * 0.42); sg.stroke();
-    sg.fillStyle = S.defender.color; sg.beginPath(); sg.moveTo(kx, ky - cs * 0.42); sg.lineTo(kx + cs * 0.32, ky - cs * 0.32); sg.lineTo(kx, ky - cs * 0.2); sg.fill();
-    // vignette
-    const vg = sg.createRadialGradient(cs * W / 2, cs * H / 2, cs * 4, cs * W / 2, cs * H / 2, cs * W * 0.65);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.35)');
-    sg.fillStyle = vg; sg.fillRect(0, 0, cs * W, cs * H);
-    view.staticBoard = c;
+    iso.buildStatic(view.dpr, view.w, view.h);
+    view.staticBoard = iso.static;
   }
 
-  const px = (cx, cy) => ({ x: view.ox + (cx + 0.5) * view.cs, y: view.oy + (cy + 0.5) * view.cs });
+  // Screen point of a (possibly fractional) cell on the isometric board, on its top surface.
+  const px = (cx, cy) => iso.pt(cx, cy);
+  // Screen vector of a step of (dx, dy) cells, normalised to about one cell.
+  const isoVec = (dx, dy) => { const vx = (dx - dy), vy = (dx + dy) / 2, n = Math.hypot(vx, vy) || 1; return { x: vx / n, y: vy / n }; };
 
   // ---------------------------------------------------------------- drawing
   function drawBackdrop() {
@@ -440,24 +438,15 @@ export async function runBattle(container, input, opts = {}) {
   }
 
   function drawFrame() {
-    const { ox, oy, cs } = view;
-    const bw = cs * W, bh = cs * H;
-    const im = artImg(BATTLE_FRAME);
-    g.save();
-    g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 24; g.fillStyle = '#000'; g.fillRect(ox, oy, bw, bh);
-    g.restore();
-    g.drawImage(view.staticBoard, ox, oy, bw, bh);
-    if (im) {
-      const m = cs * 0.55;
-      g.drawImage(im, ox - m, oy - m, bw + m * 2, bh + m * 2);
-    } else {
-      g.strokeStyle = '#8a6a2a'; g.lineWidth = 5; g.strokeRect(ox - 4, oy - 4, bw + 8, bh + 8);
-      g.strokeStyle = '#e0bb62'; g.lineWidth = 1.5; g.strokeRect(ox - 6.5, oy - 6.5, bw + 13, bh + 13);
-      g.strokeStyle = 'rgba(224,187,98,0.4)'; g.strokeRect(ox - 1.5, oy - 1.5, bw + 3, bh + 3);
-      g.fillStyle = '#e0bb62';
-      for (const [cx, cy] of [[ox, oy], [ox + bw, oy], [ox, oy + bh], [ox + bw, oy + bh]]) {
-        g.save(); g.translate(cx, cy); g.rotate(Math.PI / 4); g.fillRect(-6, -6, 12, 12); g.fillStyle = '#5a4012'; g.fillRect(-3, -3, 6, 6); g.restore(); g.fillStyle = '#e0bb62';
-      }
+    g.drawImage(iso.static, view.panX, view.panY, iso.staticW, iso.staticH);
+    iso.drawAnimated(g, view.now / 1000);
+    // soft golden light on the tiles around the Dawnwyrm
+    for (const u of b.units) {
+      if (!isDragon(u) || u.out) continue;
+      const d = view.disp.get(u.id), p = px(d.x, d.y), r = iso.a * 3.2;
+      const gl = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      gl.addColorStop(0, `rgba(255,225,140,${0.28 * d.alpha})`); gl.addColorStop(1, 'rgba(255,225,140,0)');
+      g.save(); g.globalCompositeOperation = 'lighter'; g.fillStyle = gl; g.beginPath(); g.ellipse(p.x, p.y, r, r * 0.55, 0, 0, 7); g.fill(); g.restore();
     }
   }
 
@@ -479,42 +468,34 @@ export async function runBattle(container, input, opts = {}) {
     }
   }
 
+  function diamondFill(x, y, fill, stroke, inset = 0.06) {
+    iso.diamond(g, x, y, inset);
+    if (fill) { g.fillStyle = fill; g.fill(); }
+    if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.5; g.stroke(); }
+  }
   function drawOverlays() {
     const { cs } = view;
     // objective glow
-    const op = px(OBJ.x, OBJ.y);
-    g.strokeStyle = `rgba(255,215,120,${0.35 + 0.25 * Math.sin(view.now / 300)})`; g.lineWidth = 2;
-    g.strokeRect(op.x - cs / 2 + 2, op.y - cs / 2 + 2, cs - 4, cs - 4);
+    diamondFill(OBJ.x, OBJ.y, null, `rgba(255,215,120,${0.45 + 0.3 * Math.sin(view.now / 300)})`, 0.1);
     const sel = view.sel && getUnit(b, view.sel);
     if (view.mode === 'spell' && view.spellAt) {
       const side = b.side, sp = SPIRITS[b.spirit[side]];
-      for (const c of spellCells(b, side, view.spellAt, view.spellDir)) {
-        const p = px(c.x, c.y);
-        g.fillStyle = rgba(sp.color, 0.3 + 0.15 * Math.sin(view.now / 150)); g.fillRect(p.x - cs / 2, p.y - cs / 2, cs, cs);
-        g.strokeStyle = rgba(sp.color, 0.9); g.lineWidth = 1.5; g.strokeRect(p.x - cs / 2 + 1, p.y - cs / 2 + 1, cs - 2, cs - 2);
-      }
+      for (const c of spellCells(b, side, view.spellAt, view.spellDir)) diamondFill(c.x, c.y, rgba(sp.color, 0.32 + 0.15 * Math.sin(view.now / 150)), rgba(sp.color, 0.9));
+    } else if (view.mode === 'breath' && view.spellAt) {
+      for (const c of breathCells(b, b.side, view.spellAt, view.spellDir)) diamondFill(c.x, c.y, `rgba(255,200,90,${0.32 + 0.15 * Math.sin(view.now / 120)})`, 'rgba(255,230,150,0.95)');
     } else if (sel && !view.busy && sel.side === b.side && !isAI(b.side)) {
-      for (const c of legalMoves(b, sel)) {
-        const p = px(c.x, c.y);
-        g.fillStyle = 'rgba(90,160,255,0.22)'; g.fillRect(p.x - cs / 2 + 1, p.y - cs / 2 + 1, cs - 2, cs - 2);
-        g.strokeStyle = 'rgba(140,200,255,0.55)'; g.lineWidth = 1; g.strokeRect(p.x - cs / 2 + 1.5, p.y - cs / 2 + 1.5, cs - 3, cs - 3);
-      }
+      for (const c of legalMoves(b, sel)) diamondFill(c.x, c.y, 'rgba(90,160,255,0.26)', 'rgba(150,205,255,0.6)');
       for (const id of legalTargets(b, sel)) {
         const t = getUnit(b, id), p = px(t.x, t.y);
-        const pulse = 0.5 + 0.5 * Math.sin(view.now / 160);
-        g.strokeStyle = `rgba(255,80,60,${0.6 + 0.4 * pulse})`; g.lineWidth = 2.5;
-        g.beginPath(); g.arc(p.x, p.y, cs * (0.38 + 0.04 * pulse), 0, 7); g.stroke();
-        for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; g.beginPath(); g.moveTo(p.x + Math.cos(a) * cs * 0.3, p.y + Math.sin(a) * cs * 0.3); g.lineTo(p.x + Math.cos(a) * cs * 0.5, p.y + Math.sin(a) * cs * 0.5); g.stroke(); }
+        const pul = 0.5 + 0.5 * Math.sin(view.now / 160);
+        diamondFill(t.x, t.y, `rgba(255,70,50,${0.18 + 0.12 * pul})`, `rgba(255,90,70,${0.6 + 0.4 * pul})`);
         // expected kills hint
         const k = Math.round(expectedKills(b, sel, t));
         g.font = `700 ${Math.max(10, cs * 0.26)}px Cinzel, Georgia, serif`; g.textAlign = 'center';
-        g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillText('~' + k, p.x + 1, p.y - cs * 0.48 + 1); g.fillStyle = '#ffb4a0'; g.fillText('~' + k, p.x, p.y - cs * 0.48);
+        g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillText('~' + k, p.x + 1, p.y - cs * 0.95 + 1); g.fillStyle = '#ffb4a0'; g.fillText('~' + k, p.x, p.y - cs * 0.95);
       }
     }
-    if (view.hover && !view.busy) {
-      const p = px(view.hover.x, view.hover.y);
-      g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1; g.strokeRect(p.x - cs / 2 + 0.5, p.y - cs / 2 + 0.5, cs - 1, cs - 1);
-    }
+    if (view.hover && !view.busy) diamondFill(view.hover.x, view.hover.y, 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.45)', 0.02);
   }
 
   // ---- squads: 1-6 remastered figures per unit by strength, each with its own life
@@ -548,11 +529,13 @@ export async function runBattle(container, input, opts = {}) {
   function drawUnit(u, d) {
     const { cs } = view;
     if (d.alpha <= 0.01) return;
-    const base = { x: view.ox + (d.x + 0.5) * cs, y: view.oy + (d.y + 0.5) * cs };
+    const base = px(d.x, d.y);
     let lx = 0, ly = 0;
-    if (d.lunge) { const k = Math.sin(Math.PI * d.lunge.p); lx = d.lunge.dx * k * cs * (d.lunge.reach ?? 0.3); ly = d.lunge.dy * k * cs * (d.lunge.reach ?? 0.3); }
-    if (d.recoil) { const k = d.recoil.p; lx += d.recoil.dx * Math.sin(Math.PI * k) * cs * d.recoil.amt; ly += d.recoil.dy * Math.sin(Math.PI * k) * cs * d.recoil.amt; }
-    const cx = base.x + lx, cy = base.y + ly;
+    if (d.lunge) { const k = Math.sin(Math.PI * d.lunge.p), v = isoVec(d.lunge.dx, d.lunge.dy); lx = v.x * k * cs * 1.4 * (d.lunge.reach ?? 0.3); ly = v.y * k * cs * 1.4 * (d.lunge.reach ?? 0.3); }
+    if (d.recoil) { const k = Math.sin(Math.PI * d.recoil.p), v = isoVec(d.recoil.dx, d.recoil.dy); lx += v.x * k * cs * d.recoil.amt; ly += v.y * k * cs * d.recoil.amt; }
+    // a little hop with each step while walking
+    const hop = d.walking ? -Math.abs(Math.sin(d.walkPh * 0.5)) * cs * (d.run ? 0.08 : 0.12) : 0;
+    const cx = base.x + lx, cy = base.y + ly + hop - cs * 0.25;
     const facing = d.facing;
     const done = !u.out && u.side === b.side && (u.acted) && !isAI(u.side);
     g.save();
@@ -564,10 +547,13 @@ export async function runBattle(container, input, opts = {}) {
     // house-coloured ground disc
     g.fillStyle = rgba(S[u.side].color, 0.4); g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.38, cs * 0.11, 0, 0, 7); g.fill();
     const t = view.now / 1000;
-    if (isSpirit(u)) drawSpiritUnit(u, cx, cy, d, t);
+    const isoIm = artImg(isoSlot(u));
+    if (isoIm) drawIsoSprite(u, d, cx, cy, isoIm, t, done);
+    else if (isDragon(u)) drawDragonFallback(u, cx, cy, d, t);
+    else if (isSpirit(u)) drawSpiritUnit(u, cx, cy, d, t);
     const sprite = !isSpirit(u) && spriteSlot(u);
     const im = sprite && artImg(sprite.slot);
-    if (!isSpirit(u)) {
+    if (!isSpirit(u) && !isDragon(u) && !isoIm) {
       const squad = squadOf(u, d);
       const n = squad.length;
       const s = cs * (n >= 5 ? 0.54 : n >= 3 ? 0.58 : n === 2 ? 0.64 : 0.72) * (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') ? 0.95 : u.type === 'giants' ? 0.62 : HUGE.has(u.type) ? 0.72 : 1);
@@ -596,7 +582,7 @@ export async function runBattle(container, input, opts = {}) {
     }
     // banner on the lead (leaderless units carry a plain pennant: grey cloth)
     const bx = cx - cs * 0.36 * facing, by = cy - cs * 0.46;
-    if (!isSpirit(u) && !d.flee) {
+    if (!isSpirit(u) && !isDragon(u) && !d.flee && !isoIm) {
       g.strokeStyle = '#2a1d10'; g.lineWidth = Math.max(1.2, cs / 28);
       g.beginPath(); g.moveTo(bx, by + cs * 0.6); g.lineTo(bx, by); g.stroke();
       const wave = Math.sin(t * 4 + d.phase) * cs * 0.04, wave2 = Math.sin(t * 4 + d.phase + 1.4) * cs * 0.03;
@@ -635,6 +621,84 @@ export async function runBattle(container, input, opts = {}) {
         g.beginPath(); for (let j = 0; j < 10; j++) { const r = j % 2 ? cs * 0.035 : cs * 0.08, aa = j * Math.PI / 5; j ? g.lineTo(Math.cos(aa) * r, Math.sin(aa) * r) : g.moveTo(Math.cos(aa) * r, Math.sin(aa) * r); } g.fill(); g.restore();
       }
     }
+    g.restore();
+  }
+
+  // Painted isometric sprites: 1-3 copies by strength (monsters, engines, spirits and the dragon:
+  // one), soldiers fading out as the unit loses men, mirrored for units facing west.
+  const SOLO = new Set(['siege', 'bombard', 'golem', 'wyvern', 'giants', 'trolls', 'ghosts']);
+  function isoCopies(u, d) {
+    if (isSpirit(u) || isDragon(u) || SOLO.has(u.type)) return 1;
+    const f = d.shown / u.start;
+    return f > 0.66 ? 3 : f > 0.33 ? 2 : 1;
+  }
+  function drawIsoSprite(u, d, cx, cy, img, t, done) {
+    const { cs } = view;
+    const bb = opaqueBox(img);
+    const big = isDragon(u) ? 2.5 : isSpirit(u) ? 1.55 : MOUNTED.has(u.type) || HUGE.has(u.type) || u.type === 'siege' || u.type === 'bombard' ? 1.25 : 1.05;
+    const n = isoCopies(u, d);
+    // dying copies: remember the count and fade the dropped ones out
+    if (d.isoN == null) d.isoN = n;
+    if (n < d.isoN) { (d.isoDying ||= []).push({ i: d.isoN - 1, t0: view.now }); d.isoN = n; }
+    const slots = n === 1 ? [[0, 0]] : n === 2 ? [[-0.2, -0.06], [0.18, 0.08]] : [[-0.26, -0.1], [0.24, -0.04], [0, 0.12]];
+    const base = cs * big / (n === 1 ? 1 : n === 2 ? 1.12 : 1.22);
+    const flyY = u.flying || isSpirit(u) ? -cs * (0.35 + 0.08 * Math.sin(t * 1.8 + d.phase)) : 0;
+    // glow and sigil for the big ones
+    if (isDragon(u)) {
+      g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = d.alpha * (0.5 + 0.2 * Math.sin(t * 2));
+      g.drawImage(blob(255, 225, 140), cx - cs * 1.4, cy - cs * 1.9 + flyY, cs * 2.8, cs * 2.8); g.restore();
+    } else if (isSpirit(u)) {
+      const sig = artImg(SPIRIT_SIGIL[u.type]);
+      if (sig) { const r = cs * 0.95; g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = (b.spiritUsed[u.side] ? 0.5 : 0.9);
+        g.translate(cx, cy + cs * 0.55); g.scale(1, 0.5); g.rotate(t * 0.6); g.drawImage(sig, -r, -r, r * 2, r * 2); g.restore(); }
+      g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.35; const col = hexToRgb(SPIRITS[u.type].color);
+      g.drawImage(blob(col[0], col[1], col[2]), cx - cs, cy - cs * 1.2 + flyY, cs * 2, cs * 2); g.restore();
+    }
+    const draw = (sx, sy, alpha, rot = 0) => {
+      const k = base / bb.h, dw = bb.w * k, dh = bb.h * k;
+      g.save(); g.globalAlpha = alpha; g.translate(sx, sy); if (rot) g.rotate(rot); g.scale(d.facing < 0 ? -1 : 1, 1);
+      // squash and stretch with the walk and the lunge
+      const st = d.walking ? 1 + 0.05 * Math.sin(d.walkPh) : d.lunge ? 1 + 0.08 * Math.sin(Math.PI * d.lunge.p) : 1 + 0.015 * Math.sin(t * 2 + d.phase);
+      g.scale(1 / Math.sqrt(st), st);
+      g.drawImage(img, bb.x, bb.y, bb.w, bb.h, -dw / 2, -dh, dw, dh);
+      if (d.flash > 0) { g.globalCompositeOperation = 'lighter'; g.globalAlpha = alpha * d.flash * 0.55; g.drawImage(img, bb.x, bb.y, bb.w, bb.h, -dw / 2, -dh, dw, dh); }
+      g.restore();
+    };
+    // shadows
+    for (let i = 0; i < n; i++) {
+      const [ox, oy] = slots[i];
+      g.save(); g.globalAlpha = d.alpha * 0.35; const r = base * (isDragon(u) ? 0.45 : 0.28);
+      g.drawImage(blob(0, 0, 0), cx + ox * cs - r, cy + cs * 0.25 + oy * cs - r * 0.35, r * 2, r * 0.7); g.restore();
+    }
+    for (const dy of (d.isoDying || [])) {
+      const k = clamp((view.now - dy.t0) / 800, 0, 1);
+      if (k >= 1) continue;
+      const [ox, oy] = (n + 1 === 2 ? [[-0.2, -0.06], [0.18, 0.08]] : [[-0.26, -0.1], [0.24, -0.04], [0, 0.12]])[dy.i] || [0, 0];
+      draw(cx + ox * cs, cy + cs * 0.3 + oy * cs, d.alpha * (1 - k), -k * 1.2 * (d.facing || 1));
+    }
+    const order = slots.slice(0, n).map((s2, i) => ({ s2, i })).sort((p, q) => p.s2[1] - q.s2[1]);
+    for (const { s2 } of order) draw(cx + s2[0] * cs, cy + cs * 0.3 + s2[1] * cs + flyY, d.alpha * (done ? 0.75 : 1));
+    // banner pennant on the lead copy (plain grey for leaderless troops)
+    if (!isSpirit(u) && !isDragon(u) && !d.flee) {
+      const bx = cx - cs * 0.3 * d.facing, by = cy - base * 0.75;
+      g.strokeStyle = '#2a1d10'; g.lineWidth = Math.max(1.2, cs / 28);
+      g.beginPath(); g.moveTo(bx, by + cs * 0.55); g.lineTo(bx, by); g.stroke();
+      const wave = Math.sin(t * 4 + d.phase) * cs * 0.04;
+      g.fillStyle = S[u.side].color; g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + cs * 0.12 * d.facing, by - wave, bx + cs * 0.26 * d.facing, by + cs * 0.05 + wave);
+      g.lineTo(bx, by + cs * 0.17); g.fill();
+      if (!u.leader && u.kind !== 'company') { g.fillStyle = 'rgba(20,16,24,0.55)'; g.fill(); }
+    }
+  }
+
+  // The Dawnwyrm without art: a great golden shape with beating wings.
+  function drawDragonFallback(u, cx, cy, d, t) {
+    const { cs } = view, wing = Math.sin(t * 3) * 0.3;
+    g.save(); g.translate(cx, cy - cs * 0.7); g.scale(d.facing, 1);
+    g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.6; g.drawImage(blob(255, 220, 130), -cs * 1.4, -cs * 1.4, cs * 2.8, cs * 2.8); g.globalCompositeOperation = 'source-over'; g.globalAlpha = d.alpha;
+    g.fillStyle = '#f2cf6a';
+    g.beginPath(); g.ellipse(0, 0, cs * 0.7, cs * 0.28, -0.2, 0, 7); g.fill();
+    g.beginPath(); g.moveTo(cs * 0.55, -cs * 0.15); g.lineTo(cs * 1.0, -cs * 0.45); g.lineTo(cs * 0.75, -cs * 0.05); g.fill();
+    for (const s2 of [-1, 1]) { g.beginPath(); g.moveTo(-cs * 0.1, -cs * 0.1); g.lineTo(-cs * 0.6, -cs * (0.9 + wing) * (s2 > 0 ? 1 : 0.8)); g.lineTo(cs * 0.3, -cs * 0.15); g.fill(); }
     g.restore();
   }
 
@@ -931,13 +995,13 @@ export async function runBattle(container, input, opts = {}) {
     return pre.then(() => {
       const cfg = {
         seed: (hash(att.x * 31 + def.x, att.y * 17 + def.y, b.round) * 1e9) | 0, short, terrain: b.terrain, weather: b.weather, season: b.season,
-        att: { type: att.type, kind: att.kind, spirit: isSpirit(att) ? att.type : null, before: before.att, after: att.soldiers },
-        def: { type: def.type, kind: def.kind, spirit: isSpirit(def) ? def.type : null, before: before.def, after: def.soldiers },
+        att: { type: att.type, kind: att.kind === 'dragon' ? 'troop' : att.kind, spirit: isSpirit(att) ? att.type : null, before: before.att, after: att.soldiers },
+        def: { type: def.type, kind: def.kind === 'dragon' ? 'troop' : def.kind, spirit: isSpirit(def) ? def.type : null, before: before.def, after: def.soldiers },
         hit: { killed: hit.killed, ranged: !!hit.ranged, rout: !!hit.rout }, counter: counter ? { killed: counter.killed, rout: !!counter.rout } : null,
       };
       const scene = new ClashScene(cfg);
-      const nm = u => ({ house: S[u.side].full, title: isSpirit(u) ? `Summoned spirit · ${SPIRITS[u.type].spell}` : `${typeName(u)} · ${vassalOf(u) ? vassalOf(u).name : roleOf(u)}`, col: shade(S[u.side].color, 0.45),
-        noLeader: !vassalOf(u) && !isSpirit(u) && (u.kind === 'troop' || u.kind === 'militia') });
+      const nm = u => ({ house: S[u.side].full, title: isDragon(u) ? `Holy dragon · ${DAWNWYRM.breath.name}` : isSpirit(u) ? `Summoned spirit · ${SPIRITS[u.type].spell}` : `${typeName(u)} · ${vassalOf(u) ? vassalOf(u).name : roleOf(u)}`, col: shade(S[u.side].color, 0.45),
+        noLeader: !vassalOf(u) && !isSpirit(u) && !isDragon(u) && (u.kind === 'troop' || u.kind === 'militia') });
       const fx = new ClashRenderer(scene, {
         colours: { attacker: { color: S[att.side].color, accent: S[att.side].accent }, defender: { color: S[def.side].color, accent: S[def.side].accent } },
         names: { attacker: nm(att), defender: nm(def) },
@@ -946,6 +1010,7 @@ export async function runBattle(container, input, opts = {}) {
         drawPortrait: (cg, role, x, y, w, h, flip) => portraitCard(cg, R[role], x, y, w, h, R[role].side, flip),
         drawCrest: (cg, role, x, y, s2) => crestAt(cg, R[role].side, x, y, s2),
         sfx: name => sfx.play(name),
+        fighterImg: key => artImg(key === 'dawnwyrm' ? DRAGON_ART.fighter : FIGHTER[key]),
       });
       return new Promise(res => {
         overlay.hidden = false;
@@ -1146,7 +1211,14 @@ export async function runBattle(container, input, opts = {}) {
       spBtn.classList.toggle('bt-on', view.mode === 'spell');
       spBtn.title = SPIRITS[mySp].text;
     }
-    $('.bt-rotate').hidden = !(view.mode === 'spell' && ['line', 'wall'].includes(SPIRITS[b.spirit[b.side]]?.shape));
+    $('.bt-rotate').hidden = !((view.mode === 'spell' && ['line', 'wall'].includes(SPIRITS[b.spirit[b.side]]?.shape)) || view.mode === 'breath');
+    const brBtn = $('.bt-breath'), myDragon = playerSide && dragonOf(b, playerSide);
+    brBtn.hidden = !myDragon;
+    if (myDragon) {
+      brBtn.disabled = !myTurn || !canBreathe(b, playerSide);
+      brBtn.classList.toggle('bt-on', view.mode === 'breath');
+      brBtn.lastChild.textContent = b.dragonUsed[playerSide] ? ` ${DAWNWYRM.breath.name} (spent)` : myDragon.out ? ' (fled)' : ` ${DAWNWYRM.breath.name}`;
+    }
   }
   function spiritIcon() {
     const mySp = playerSide && b.spirit[playerSide];
@@ -1238,6 +1310,14 @@ export async function runBattle(container, input, opts = {}) {
         floatText(t.x, t.y, '-' + e.killed, '#ff9a70');
       } else if (e.t === 'rout') {
         await routUnit(getUnit(b, e.unit));
+      } else if (e.t === 'burn') {
+        const u = getUnit(b, e.unit), d = view.disp.get(u.id), p = px(u.x, u.y);
+        d.shown = Math.max(u.soldiers, d.shown - e.killed); d.flash = 0.8;
+        view.P.embers(p.x, p.y, 10, [255, 120, 40], 0.8);
+        floatText(u.x, u.y, '-' + e.killed + ' (lava)', '#ff8a40');
+        await tween(260, k => { d.flash = 0.8 * (1 - k); });
+      } else if (e.t === 'breath') {
+        await breathSequence(e, events.slice(i + 1));
       } else if (e.t === 'spell') {
         await spellSequence(e, events.slice(i + 1));
       } else if (e.t === 'heal') {
@@ -1466,7 +1546,7 @@ export async function runBattle(container, input, opts = {}) {
     const anim = new SpellAnim({ ...e, casterAt: caster ? { x: caster.x, y: caster.y } : null }, {
       px, cs: view.cs, P: view.P, shake: v => shakeBy(v), sfx: n => sfx.play(n),
       whiteout: (a, rgb) => { view.whiteout = Math.max(view.whiteout, a); view.whiteCol = rgb.join(','); },
-      board: { x: view.ox, y: view.oy, w: view.cs * W, h: view.cs * H },
+      board: iso.bounds(),
     });
     const dur = anim.dur;
     // Bulwark: the new wall squares rise one after another
@@ -1491,6 +1571,81 @@ export async function runBattle(container, input, opts = {}) {
     });
     view.spell = null;
     await wait(150);
+  }
+
+  // The Dawnwyrm's breath: it rears up in a golden glow, then a sweep of golden fire runs down the
+  // line, square by square, with heat shimmer; losses land as the fire reaches each square.
+  async function breathSequence(e, rest = []) {
+    const caster = getUnit(b, e.caster), dC = view.disp.get(caster.id);
+    const cp = px(caster.x, caster.y), cs = view.cs;
+    sfx.play('spell'); try { playSting('summon'); } catch { /* audio unavailable */ }
+    showBanner(`${DAWNWYRM.name}: ${DAWNWYRM.breath.name}`, e.side);
+    dC.flash = 1; view.P.flash(cp.x, cp.y - cs, 1.4, [255, 230, 150]);
+    if (cutMode() === 'full' && artImg(DRAGON_ART.fighter)) await momentCutin(DRAGON_ART.fighter, DAWNWYRM.breath.name, 'Golden fire pours from the sky.', '#ffe9a8');
+    const cells = e.cells;
+    const dur = 1100 + cells.length * 120;
+    view.breath = { cells, t0: view.now, dur: dur / speed(), from: { x: cp.x, y: cp.y - cs * 1.2 } };
+    const routs = new Set(rest.filter(r => r.t === 'rout').map(r => r.unit));
+    const hits = e.hits.map(h => {
+      const u = getUnit(b, h.unit), ci = cells.findIndex(c => c.x === u.x && c.y === u.y);
+      return { h, u, k: 0.25 + 0.7 * (Math.max(0, ci) + 0.5) / cells.length, done: false };
+    });
+    const lit = new Set();
+    whiteout(0.25, [255, 236, 180]);
+    await tween(dur, k => {
+      dC.flash = Math.max(0, 1 - k * 1.5);
+      cells.forEach((c, i) => {
+        const at = 0.2 + 0.7 * i / cells.length;
+        if (k >= at && !lit.has(i)) {
+          lit.add(i);
+          const p = px(c.x, c.y);
+          view.P.flash(p.x, p.y, 1.0, [255, 210, 120]); view.P.embers(p.x, p.y, 14, [255, 200, 90], 1.1); view.P.smoke(p.x, p.y - cs * 0.2, 3, 0.5, 200, 0);
+          shakeBy(5);
+        }
+      });
+      for (const it of hits) if (!it.done && k >= it.k) {
+        it.done = true;
+        const d = view.disp.get(it.u.id);
+        d.flash = 1; d.shown = Math.max(it.u.soldiers, d.shown - it.h.killed);
+        floatText(it.u.x, it.u.y, '-' + it.h.killed, '#ffd27a', true);
+        tween(400, kk => { d.flash = 1 - kk; });
+        if (routs.has(it.u.id)) d.shown = it.u.soldiers;
+      }
+    });
+    view.breath = null;
+    await wait(150);
+  }
+  const whiteout = (a, rgb) => { view.whiteout = Math.max(view.whiteout, a); view.whiteCol = rgb.join(','); };
+  // Golden fire on the breath line: a moving front with flames and heat shimmer behind it.
+  function drawBreath() {
+    const br = view.breath;
+    if (!br) return;
+    const k = clamp((view.now - br.t0) / br.dur, 0, 1), cs = view.cs, t = view.now / 1000;
+    g.save(); g.globalCompositeOperation = 'lighter';
+    br.cells.forEach((c, i) => {
+      const at = 0.2 + 0.7 * i / br.cells.length;
+      if (k < at - 0.05) return;
+      const life = clamp((k - at) / 0.5, 0, 1), fade = 1 - clamp((k - 0.85) / 0.15, 0, 1);
+      const p = px(c.x, c.y);
+      for (let j = 0; j < 5; j++) {
+        const fx = p.x + Math.sin(j * 2.1 + t * 9) * cs * 0.35, fy = p.y - cs * (0.2 + 0.5 * ((t * 2 + j * 0.37) % 1));
+        g.globalAlpha = 0.55 * fade * (1 - life * 0.4);
+        g.drawImage(blob(255, 190 + j * 10, 90), fx - cs * 0.45, fy - cs * 0.45, cs * 0.9, cs * 0.9);
+      }
+      // heat shimmer: wavy pale lines rising
+      g.globalAlpha = 0.18 * fade; g.strokeStyle = 'rgba(255,240,200,1)'; g.lineWidth = 1;
+      for (let j = 0; j < 3; j++) { const sx = p.x + (j - 1) * cs * 0.3; g.beginPath(); g.moveTo(sx, p.y); for (let q = 1; q <= 6; q++) g.lineTo(sx + Math.sin(t * 6 + q + j) * cs * 0.06, p.y - q * cs * 0.18); g.stroke(); }
+    });
+    // the stream from the dragon to the fire front
+    const front = br.cells[Math.min(br.cells.length - 1, Math.floor(clamp((k - 0.2) / 0.7, 0, 0.999) * br.cells.length))];
+    if (front && k < 0.92) {
+      const fp = px(front.x, front.y);
+      const grd = g.createLinearGradient(br.from.x, br.from.y, fp.x, fp.y);
+      grd.addColorStop(0, 'rgba(255,250,220,0.9)'); grd.addColorStop(1, 'rgba(255,170,60,0.4)');
+      g.globalAlpha = 0.8; g.strokeStyle = grd; g.lineWidth = cs * 0.35; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(br.from.x, br.from.y); g.quadraticCurveTo((br.from.x + fp.x) / 2, Math.min(br.from.y, fp.y) - cs * 0.6, fp.x, fp.y - cs * 0.2); g.stroke();
+    }
+    g.restore();
   }
 
   // ---------------------------------------------------------------- flow
@@ -1525,7 +1680,7 @@ export async function runBattle(container, input, opts = {}) {
         const ok = await act(a);
         if (!ok && a.unit) await act({ type: 'wait', unit: a.unit });
         else if (!ok) await act({ type: 'endSide' });
-      } else if (sideDone(b) && !canCast(b, b.side)) {
+      } else if (sideDone(b) && !canCast(b, b.side) && !canBreathe(b, b.side)) {
         // player has nothing left to do: end the side automatically after a beat
         await wait(500);
         if (!isAI(b.side) && sideDone(b) && !view.busy && !b.winner) await act({ type: 'endSide' });
@@ -1583,25 +1738,76 @@ export async function runBattle(container, input, opts = {}) {
   // ---------------------------------------------------------------- input
   function cellFromEvent(e) {
     const r = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - r.left - view.ox) / view.cs), y = Math.floor((e.clientY - r.top - view.oy) / view.cs);
-    return x >= 0 && y >= 0 && x < W && y < H ? { x, y } : null;
+    return iso.pick(e.clientX - r.left, e.clientY - r.top);
   }
+  // Camera: wheel zooms about the cursor, drag pans, two fingers pinch.
+  const pointers = new Map();
+  let drag = null, pinch0 = null, rebuildPending = false;
+  function setZoom(z, ax, ay) {
+    const nz = clamp(z, 0.7, 2.6);
+    if (Math.abs(nz - view.zoom) < 1e-3) return;
+    // board point under the anchor: screen = origin(zoom) + pan + v * a(zoom)
+    iso.fit(view.w, view.h, view.zoom, 0, 0);
+    const o0 = { x: iso.ox, y: iso.oy }, a0 = iso.a;
+    const v = { x: (ax - o0.x - view.panX) / a0, y: (ay - o0.y - view.panY) / a0 };
+    view.zoom = nz;
+    iso.fit(view.w, view.h, view.zoom, 0, 0);
+    view.panX = clamp(ax - iso.ox - v.x * iso.a, -view.w * 1.2, view.w * 1.2);
+    view.panY = clamp(ay - iso.oy - v.y * iso.a, -view.h * 1.2, view.h * 1.2);
+    iso.fit(view.w, view.h, view.zoom, view.panX, view.panY);
+    if (!rebuildPending) { rebuildPending = true; requestAnimationFrame(() => { rebuildPending = false; layout(); }); }
+  }
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    setZoom(view.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', e => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) { const [a1, a2] = [...pointers.values()]; pinch0 = { d: Math.hypot(a1.x - a2.x, a1.y - a2.y), z: view.zoom }; drag = null; }
+    else drag = { x: e.clientX, y: e.clientY, px: view.panX, py: view.panY, moved: false };
+  }, true);
+  canvas.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch0 && pointers.size === 2) {
+      const [a1, a2] = [...pointers.values()], r = canvas.getBoundingClientRect();
+      setZoom(pinch0.z * Math.hypot(a1.x - a2.x, a1.y - a2.y) / Math.max(10, pinch0.d), (a1.x + a2.x) / 2 - r.left, (a1.y + a2.y) / 2 - r.top);
+      return;
+    }
+    if (drag && (drag.moved || Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8)) {
+      drag.moved = true;
+      view.panX = clamp(drag.px + e.clientX - drag.x, -view.w * 0.8, view.w * 0.8);
+      view.panY = clamp(drag.py + e.clientY - drag.y, -view.h * 0.8, view.h * 0.8);
+      iso.fit(view.w, view.h, view.zoom, view.panX, view.panY);
+    }
+  }, true);
+  const endPointer = e => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch0 = null; };
+  canvas.addEventListener('pointerup', endPointer, true);
+  canvas.addEventListener('pointercancel', endPointer, true);
   canvas.addEventListener('pointermove', e => {
     const c = cellFromEvent(e);
     view.hover = c;
-    if (view.mode === 'spell' && e.pointerType === 'mouse') view.spellAt = c;
+    if ((view.mode === 'spell' || view.mode === 'breath') && e.pointerType === 'mouse') view.spellAt = c;
     const u = c && unitAt(b, c.x, c.y);
     if (e.pointerType === 'mouse') showTip(u || (view.sel && null));
   });
   canvas.addEventListener('pointerleave', () => { view.hover = null; tip.hidden = true; });
-  canvas.addEventListener('contextmenu', e => { e.preventDefault(); if (view.mode === 'spell') rotate(); else { view.sel = null; updateHud(); } });
-  canvas.addEventListener('pointerdown', async e => {
+  canvas.addEventListener('contextmenu', e => { e.preventDefault(); if (view.mode === 'spell' || view.mode === 'breath') rotate(); else { view.sel = null; updateHud(); } });
+  canvas.addEventListener('pointerup', async e => {
     sfx.unlock();
     if (e.button === 2) return;
+    if (drag && drag.moved) { drag = null; return; }
+    drag = null;
     const c = cellFromEvent(e);
     if (!c || view.busy || b.winner) return;
     const u = unitAt(b, c.x, c.y);
     if (isAI(b.side)) { showTip(u); return; }
+    if (view.mode === 'breath') {
+      if (e.pointerType !== 'mouse' && (!view.spellAt || view.spellAt.x !== c.x || view.spellAt.y !== c.y)) { view.spellAt = c; return; }
+      await act({ type: 'spell', unit: b.dragonUnit[b.side], target: c, dir: view.spellDir });
+      return;
+    }
     if (view.mode === 'spell') {
       // touch: first tap previews, second tap on the same square casts
       if (e.pointerType !== 'mouse' && (!view.spellAt || view.spellAt.x !== c.x || view.spellAt.y !== c.y)) { view.spellAt = c; return; }
@@ -1624,6 +1830,13 @@ export async function runBattle(container, input, opts = {}) {
   $('.bt-cut').addEventListener('click', () => { prefs.cutins = { full: 'short', short: 'off', off: 'full' }[prefs.cutins]; savePrefs(prefs); updateHud(); });
   $('.bt-sound').addEventListener('click', () => { prefs.sound = !prefs.sound; sfx.muted = !prefs.sound; savePrefs(prefs); updateHud(); });
   $('.bt-rotate').addEventListener('click', rotate);
+  $('.bt-breath').addEventListener('click', () => {
+    if (!canBreathe(b, b.side) || isAI(b.side)) return;
+    view.mode = view.mode === 'breath' ? 'idle' : 'breath';
+    view.spellDir = b.side === 'attacker' ? 'right' : 'left';
+    view.spellAt = null;
+    updateHud();
+  });
   $('.bt-spirit').addEventListener('click', () => {
     if (!canCast(b, b.side) || isAI(b.side)) return;
     view.mode = view.mode === 'spell' ? 'idle' : 'spell';
@@ -1697,9 +1910,14 @@ export async function runBattle(container, input, opts = {}) {
     drawOverlays();
     const spellK = view.spell ? clamp((now - view.spell.t0) / view.spell.dur, 0, 1) : 0;
     if (view.spell && view.spell.anim.id === 'gale') view.spell.anim.draw(g, spellK, now / 1000);   // the dark sky goes under the units
-    const order = b.units.slice().sort((p, q) => (view.disp.get(p.id).y - view.disp.get(q.id).y));
-    for (const u of order) drawUnit(u, view.disp.get(u.id));
+    // props and units back to front (x + y), a prop before a unit on the same tile
+    const items = props.map(pr => ({ k: pr.x + pr.y - 0.02, pr }));
+    for (const u of b.units) { const d = view.disp.get(u.id); items.push({ k: d.x + d.y + (u.flying ? 0.3 : 0), u, d }); }
+    items.sort((p, q) => p.k - q.k);
+    const tnow = view.now / 1000;
+    for (const it of items) { if (it.pr) it.pr.draw(g, tnow); else drawUnit(it.u, it.d); }
     drawSpellFx();
+    drawBreath();
     if (view.spell) { view.spell.anim.update(spellK, dt); if (view.spell.anim.id !== 'gale') view.spell.anim.draw(g, spellK, now / 1000); }
     drawProjectiles();
     drawParticles(dt);
@@ -1790,6 +2008,17 @@ export async function runBattle(container, input, opts = {}) {
     for (const side of ['attacker', 'defender']) {
       const su = spiritOf(b, side);
       if (su && !su.out && b.round === 1 && b.side === 'attacker' && !b.spiritUsed[side]) await spiritCutin(side, su.type, true);
+    }
+    for (const side of ['attacker', 'defender']) {
+      const dw = dragonOf(b, side);
+      if (!dw || dw.out || b.round !== 1) continue;
+      try { playSting('summon'); } catch { /* audio unavailable */ }
+      whiteout(0.6, [255, 240, 200]);
+      if (cutMode() !== 'off' && artImg(DRAGON_ART.summon)) await momentCutin(DRAGON_ART.summon, 'The Dawnwyrm Descends', `A holy dragon of the Lantern answers ${S[side].full}.`, '#ffe9a8');
+      else showBanner('The Dawnwyrm descends!', side);
+      const p = px(dw.x, dw.y);
+      view.P.flash(p.x, p.y - view.cs, 1.6, [255, 230, 160]); view.P.ring(p.x, p.y, 1.4, [255, 220, 140], 4);
+      shakeBy(8);
     }
     if (spiritOf(b, 'attacker') && spiritOf(b, 'defender')) await extraMoment('spiritClash', 'Spirits Collide', 'The sky itself takes sides.', '#c9a0ff');
     const L = leader('attacker');

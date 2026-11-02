@@ -23,7 +23,7 @@ function rng(seed) {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function squadCount(u) {
-  if (u.kind === 'spirit') return 1;
+  if (u.kind === 'spirit' || u.kind === 'dragon' || u.type === 'dawnwyrm') return 1;
   if (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') || u.type === 'golem') return 1;
   if (u.type === 'wyvern' || u.type === 'giants') return u.before >= 30 ? 2 : 1;
   if (u.type === 'trolls') return clamp(Math.round(u.before / 25), 2, 3);
@@ -81,7 +81,7 @@ export class ClashScene {
   build(side, u) {
     const n = squadCount(u);
     const dir = side === 'attacker' ? 1 : -1;
-    const big = u.kind === 'spirit' || u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') || HUGE.has(u.type) || u.type === 'wyvern';
+    const big = u.kind === 'spirit' || u.type === 'dawnwyrm' || u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') || HUGE.has(u.type) || u.type === 'wyvern';
     const startFront = side === 'attacker'
       ? (this.short ? (this.aRanged ? 140 : this.contactA - 46) : (this.aRanged ? 120 : -10))
       : (this.short ? (this.dHolds ? this.contactD : this.contactD + 30) : (this.dHolds ? this.contactD : 330));
@@ -89,10 +89,10 @@ export class ClashScene {
       const rank = big ? 0 : i % 2, file = big ? i : (i >> 1);
       const gap = MOUNTED.has(u.type) ? 46 : big ? 80 : 26;
       const x = side === 'attacker' ? startFront - file * gap - rank * 10 : startFront + file * gap + rank * 10;
-      const y = (FLYING.has(u.type) ? 150 + (i % 2) * 14 : rank ? BACK_Y : FRONT_Y) + (this.r() - 0.5) * 4;
+      const y = (FLYING.has(u.type) || u.type === 'dawnwyrm' ? 150 + (i % 2) * 14 : rank ? BACK_Y : FRONT_Y) + (this.r() - 0.5) * 4;
       this.actors.push({
         id: `${side[0]}${i}`, side, type: u.kind === 'spirit' ? 'spirit' : u.type, spirit: u.spirit, kind: u.kind,
-        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 92 : (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard')) ? 58 : 40,
+        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 92 : u.type === 'dawnwyrm' ? 120 : (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard')) ? 58 : 40,
         v: i, walk: this.r() * 6, moving: false, run: false, act: 'idle', actF0: 0, actLen: 1,
         dead: false, deadF: 0, flee: false, fleeF: 0, alpha: 1, glow: 0,
       });

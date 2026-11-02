@@ -19,6 +19,42 @@ import { drawSpirit } from './spirit-art.js';
 import { Particles, canvasOf, blob, hexRgb, mix, reducedMotion } from './fx.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Painted side-view fighters (art slots FIGHTER / DRAGON_ART.fighter) by unit type and action.
+// opts.fighterImg(key) -> HTMLImageElement | null. Each sprite is a single pose; squash/stretch,
+// lean and motion blur make it feel animated, and its neutral heraldry is tinted toward the house.
+const FIGHTER_KEY = {
+  footmen: { idle: 'footmenBlock', block: 'footmenBlock', default: 'footmenSwing' },
+  pikes: { idle: 'pikesBrace', block: 'pikesBrace', default: 'pikesThrust' },
+  archers: { draw: 'archersDraw', idle: 'archersDraw', default: 'archersLoose' },
+  horse: { default: 'horse' }, knights: { default: 'knights' }, siege: { default: 'siege' },
+  wolfriders: { default: 'wolfriders' }, trolls: { default: 'trolls' }, arquebusiers: { default: 'arquebusiers' },
+  giants: { default: 'giants' }, skeletons: { default: 'skeletons' }, lizardfolk: { default: 'lizardfolk' },
+  harpies: { default: 'harpies' }, sellswords: { default: 'sellswords' }, militia: { default: 'militia' },
+  druids: { default: 'druids' }, ghosts: { default: 'ghosts' }, bandits: { default: 'archersLoose' },
+  bombard: { default: 'siege' }, bombards: { default: 'siege' },
+};
+function fighterKey(type, act) {
+  if (act === 'fall') return 'fall';
+  if (act === 'flee') return 'flee';
+  if (type === 'dawnwyrm') return 'dawnwyrm';
+  const m = FIGHTER_KEY[type];
+  return m ? (m[act] || m.default) : null;
+}
+const tintCache = new Map();
+function tintedFighter(img, color, key) {
+  const k = key + color;
+  if (tintCache.has(k)) return tintCache.get(k);
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  g.globalCompositeOperation = 'source-atop'; g.globalAlpha = 0.3; g.fillStyle = color; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'multiply'; g.globalAlpha = 0.25; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'destination-in'; g.globalAlpha = 1; g.drawImage(img, 0, 0);
+  tintCache.set(k, c);
+  return c;
+}
 const easeOut = t => 1 - Math.pow(1 - t, 3);
 const SPIRIT_COL = { ember: '#ff7a2f', tide: '#3fb6ff', gale: '#d6e4ff', stone: '#c8a060', dusk: '#9a6bff' };
 
@@ -47,6 +83,31 @@ export class ClashRenderer {
     this.rimCss = { attacker: `rgb(${this.rim.attacker.map(v => v | 0)})`, defender: `rgb(${this.rim.defender.map(v => v | 0)})` };
     this.sfx = opts.sfx || (() => {});
     this.trails = new Map();
+  }
+
+  // One painted fighter: feet at (x, y), height ~ 1.35 x the figure size, mirrored for the right
+  // side, with squash/stretch and lean from the action, a fall rotation and a house rim glow.
+  drawFighter(cg, img, a, x, y, s, pose, alpha) {
+    const w = img.width, h = img.height;
+    const H2 = s * (a.type === 'dawnwyrm' ? 1.6 : MOUNTED.has(a.type) || HUGE.has(a.type) || a.type === 'siege' ? 1.55 : 1.35);
+    const W2 = H2 * w / h;
+    const k = clamp(pose.k ?? 0, 0, 1);
+    let sx = 1, sy = 1, rot = 0, dx = 0;
+    if (pose.act === 'fall') { rot = -k * 1.35; dx = -k * s * 0.3; }
+    else if (pose.act === 'flee') { sy = 1 + 0.05 * Math.sin((pose.walk || 0) * 3); }
+    else if (pose.act && pose.act !== 'idle') {
+      const p = Math.sin(Math.PI * k);   // wind-up and strike
+      sx = 1 + 0.10 * p; sy = 1 - 0.07 * p; rot = 0.12 * p; dx = s * 0.18 * p;
+    } else { const b = Math.sin(((pose.t || 0) + (a.v || 0)) * 2.2) * 0.02; sy = 1 + b; sx = 1 - b * 0.5; }
+    if (a.moving) { const b = Math.abs(Math.sin((a.walk || 0) * 1.2)); sy *= 1 + 0.05 * b; }
+    cg.save();
+    cg.globalAlpha = alpha;
+    cg.translate(x + dx * a.facing, y);
+    cg.scale(a.facing, 1);
+    cg.rotate(rot);
+    cg.scale(sx, sy);
+    cg.drawImage(img, -W2 * 0.5, -H2, W2, H2);
+    cg.restore();
   }
 
   // ---------------------------------------------------------------- events -> effects
@@ -266,6 +327,16 @@ export class ClashRenderer {
         continue;
       }
       const s = a.s * S;
+      const fk = this.o.fighterImg ? fighterKey(a.type, pose.act) : null;
+      const fimg = fk && this.o.fighterImg(fk);
+      if (fimg) {
+        const al = a.dead ? clamp(1 - (f - a.deadF) / 50, 0, 1) : 1;
+        if (al <= 0) continue;
+        const src = a.type === 'dawnwyrm' ? fimg : tintedFighter(fimg, this.o.colours[a.side].color, fk);
+        if (Math.abs(v) > 3 && !this.reduced) for (let i = 2; i >= 1; i--) this.drawFighter(cg, src, a, x - v * S * i * 1.3, y, s, pose, 0.2 / i * al);
+        this.drawFighter(cg, src, a, x, y, s, pose, al);
+        continue;
+      }
       if (Math.abs(v) > 3 && !this.reduced) {
         for (let i = 2; i >= 1; i--) blitFigure(cg, a.type, this.pal[a.side], x - v * S * i * 1.3, y, s, a.facing, pose, this.rimCss[a.side], 0.18 / i);
       }
