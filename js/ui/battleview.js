@@ -473,6 +473,42 @@ export async function runBattle(container, input, opts = {}) {
     if (fill) { g.fillStyle = fill; g.fill(); }
     if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1.5; g.stroke(); }
   }
+  // Drawn after walls and units, so the siege objectives are never hidden behind the castle:
+  // a floating GATE marker until the gate is broken (and the move highlight on top of the gate
+  // block when the selected unit can reach it), and a KEEP marker on the objective square.
+  function drawObjectiveMarkers() {
+    const { cs } = view;
+    const gi = b.grid.indexOf('gate');
+    const pul = 0.5 + 0.5 * Math.sin(view.now / 220);
+    const label = (x, y, text, col, lift, dx = 0) => {
+      const p0 = px(x, y), p = { x: p0.x + cs * dx, y: p0.y };
+      const ty = p.y - cs * lift;
+      g.save();
+      g.font = `700 ${Math.max(11, cs * 0.3)}px Cinzel, Georgia, serif`; g.textAlign = 'center';
+      const w = g.measureText(text).width + cs * 0.4, hgt = Math.max(16, cs * 0.42);
+      g.fillStyle = 'rgba(12,10,8,0.78)'; g.strokeStyle = col; g.lineWidth = 1.5;
+      g.beginPath(); g.roundRect ? g.roundRect(p.x - w / 2, ty - hgt * 0.78, w, hgt, 5) : g.rect(p.x - w / 2, ty - hgt * 0.78, w, hgt); g.fill(); g.stroke();
+      g.fillStyle = col; g.fillText(text, p.x, ty);
+      // a little pointer down to the tile
+      // a pointer line down to the tile
+      g.beginPath(); g.moveTo(p.x, ty - hgt * 0.78 + hgt); g.lineTo(p0.x, p0.y - cs * 0.25); g.stroke();
+      g.restore();
+    };
+    if (gi >= 0 && !b.gateBreached) {
+      const gx = gi % W, gy = (gi / W) | 0;
+      const sel = view.sel && getUnit(b, view.sel);
+      const canReach = sel && !view.busy && sel.side === b.side && sel.side === 'attacker' && !isAI(b.side) &&
+        legalMoves(b, sel).some(c => c.x === gx && c.y === gy);
+      if (canReach) {
+        g.save(); g.globalAlpha = 0.85;
+        diamondFill(gx, gy, `rgba(90,160,255,${0.35 + 0.2 * pul})`, 'rgba(170,215,255,0.95)', 0.02);
+        g.restore();
+      } else diamondFill(gx, gy, `rgba(255,150,60,${0.12 + 0.1 * pul})`, `rgba(255,170,80,${0.55 + 0.4 * pul})`, 0.04);
+      label(gx, gy, canReach ? '⚔ GATE · move here to break it' : '⚔ GATE', canReach ? '#bfe0ff' : '#ffc27a', 0.9 + 0.06 * pul, -1.6);
+    }
+    if (b.siege !== false && b.grid[OBJ.y * W + OBJ.x] === 'keep') label(OBJ.x, OBJ.y, '♛ KEEP · hold for a round', '#f3d27a', 2.6, 0.6);
+  }
+
   function drawOverlays() {
     const { cs } = view;
     // objective glow
@@ -1921,6 +1957,7 @@ export async function runBattle(container, input, opts = {}) {
     items.sort((p, q) => p.k - q.k);
     const tnow = view.now / 1000;
     for (const it of items) { if (it.pr) it.pr.draw(g, tnow); else drawUnit(it.u, it.d); }
+    drawObjectiveMarkers();
     drawSpellFx();
     drawBreath();
     if (view.spell) { view.spell.anim.update(spellK, dt); if (view.spell.anim.id !== 'gale') view.spell.anim.draw(g, spellK, now / 1000); }
