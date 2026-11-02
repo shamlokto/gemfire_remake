@@ -4,23 +4,53 @@
 // an undo point should snapshot with JSON.parse(JSON.stringify(state)) first. The whole state is
 // plain JSON, so saving is JSON.stringify(state).
 //
-// Additions beyond docs/DESIGN.md:
+// v2 army model (docs/DESIGN.md, "v2: islands map and the army model"):
+//   province.units: [Unit]          troop units garrisoned there (max MAX_UNITS_PER_PROVINCE)
+//   Unit = { uid, type, soldiers, training, leader: vassalId|null }
+//   province.militia: [soldiers]    free holds only: 1-3 leaderless militia units ([] when owned)
+//   state.nextUid                   counter for unit uids ("u1", "u2", ...)
+//   vassals carry no soldiers; a vassal leads at most one unit in the same province.
+//
+// Other additions beyond docs/DESIGN.md:
 //   marches: [March]   queued attacks, resolved at month end (see orders.js / turn.js)
 //   autoPlayer: bool   if true the AI also plays the player's house (tests, demo mode)
 //   defeated: bool     the player's house has been eliminated (game over)
 //   vassal.marching    true while the vassal is part of a queued march (location is null then)
-// March = { house, from, to, vassals: [vassalId], company: {type, soldiers}|null, food }
+// March = { house, from, to, units: [Unit], vassals: [vassalId],
+//           fifth: null | { kind: 'company', type, soldiers } | { kind: 'spirit', id }, food }
 
-import { PROVINCES, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, START_YEAR, seasonOf, ADJACENCY } from '../data/world.js';
+import {
+  PROVINCES, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, START_YEAR, seasonOf, ADJACENCY, VICTORY_PROVINCES as VP,
+} from '../data/world.js';
 import { HOUSES, HOUSE_START, HOUSE_BY_ID } from '../data/houses.js';
 import { VASSALS, VASSAL_BY_ID } from '../data/vassals.js';
-import { TROOPS, COMPANIES, MILITIA } from '../data/units.js';
+import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY } from '../data/units.js';
+import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { STORY } from '../data/events.js';
 import { makeRng } from '../rng.js';
 
-export const STATE_VERSION = 1;
-export const VICTORY_PROVINCES = 18;
+export const STATE_VERSION = 2;
+export const VICTORY_PROVINCES = VP;
 export const START_TRAINING = 40;
+export const CAPITAL_LEVY = { units: 2, type: 'footmen', soldiers: 80 };
+export const LEADERLESS_FACTOR = 0.85;   // power estimate of a unit with no leader
+
+export function newUid(state) {
+  state.nextUid = (state.nextUid || 0) + 1;
+  return 'u' + state.nextUid;
+}
+
+// Split a militia total into 1-3 units.
+function splitMilitia(rng, total) {
+  const n = total < 80 ? 1 : rng.int(1, total > 110 ? 3 : 2);
+  const out = [];
+  let left = total;
+  for (let i = 0; i < n; i++) {
+    const part = i === n - 1 ? left : Math.round(total / n);
+    out.push(part); left -= part;
+  }
+  return out;
+}
 
 export function newGame(player, seed = 1) {
   if (!HOUSE_BY_ID[player]) throw new Error('unknown house ' + player);
@@ -35,8 +65,8 @@ export function newGame(player, seed = 1) {
       id: p.id, owner: o,
       fields: base.fields, market: base.market, dikes: base.dikes, loyalty: base.loyalty,
       food: base.food, gold: base.gold,
-      vassals: [], company: null,
-      militia: o ? 0 : rng.int(NEUTRAL_MILITIA.min, NEUTRAL_MILITIA.max),
+      vassals: [], units: [], company: null,
+      militia: o ? [] : splitMilitia(rng, rng.int(NEUTRAL_MILITIA.min, NEUTRAL_MILITIA.max)),
       shard: null, ordered: false,
     };
   });
@@ -49,34 +79,35 @@ export function newGame(player, seed = 1) {
     if (h.shard) provinces[h.capital].shard = h.shard;
   }
 
-  const vassals = {};
-  for (const v of VASSALS) {
-    vassals[v.id] = {
-      id: v.id, house: v.house, might: v.might, wits: v.wits, charm: v.charm, loyalty: v.loyalty,
-      troop: v.troop, soldiers: v.soldiers, training: START_TRAINING, location: v.at,
-      status: 'active', captor: null, marching: false,
-    };
-    provinces[v.at].vassals.push(v.id);
-  }
-
-  const houses = {};
-  const intel = {};
-  for (const h of HOUSES) {
-    houses[h.id] = { id: h.id, alive: true, ruler: h.ruler, capital: h.capital, spiritUsed: {} };
-    intel[h.id] = {};
-  }
-
-  return {
-    version: STATE_VERSION, seed: seed >>> 0, rng: rng.state,
+  const state = {
+    version: STATE_VERSION, seed: seed >>> 0, rng: 0,
     turn: 0, year: START_YEAR, month: 0,
     player,
-    houses, provinces, vassals,
-    truces: {}, marriages: [], intel,
+    houses: {}, provinces, vassals: {},
+    truces: {}, marriages: [], intel: {},
     log: [{ turn: 0, text: `${HOUSE_BY_ID[player].name} takes up the struggle for Varenhold.`, kind: 'story' }],
     pendingEvents: [{ art: STORY.prologue.art, title: STORY.prologue.title, text: STORY.prologue.text }],
     marches: [], autoPlayer: false, defeated: false,
-    winner: null,
+    winner: null, nextUid: 0,
   };
+
+  for (const v of VASSALS) {
+    state.vassals[v.id] = {
+      id: v.id, house: v.house, might: v.might, wits: v.wits, charm: v.charm, loyalty: v.loyalty,
+      location: v.at, status: 'active', captor: null, marching: false,
+    };
+    provinces[v.at].vassals.push(v.id);
+    provinces[v.at].units.push({ uid: newUid(state), type: v.troop, soldiers: v.soldiers, training: START_TRAINING, leader: v.id });
+  }
+  for (const h of HOUSES) {
+    state.houses[h.id] = { id: h.id, alive: true, ruler: h.ruler, capital: h.capital, spiritUsed: {} };
+    state.intel[h.id] = {};
+    for (let i = 0; i < CAPITAL_LEVY.units; i++) {
+      provinces[h.capital].units.push({ uid: newUid(state), type: CAPITAL_LEVY.type, soldiers: CAPITAL_LEVY.soldiers, training: 30, leader: null });
+    }
+  }
+  state.rng = rng.state;
+  return state;
 }
 
 // ---------- RNG helper: use the state's rng and write it back ----------
@@ -95,6 +126,18 @@ export function ownedProvinces(state, house) {
 export function provinceVassals(state, pid) {
   return state.provinces[pid].vassals.map(id => state.vassals[id]).filter(v => v && v.status === 'active');
 }
+export function provinceUnits(state, pid) { return state.provinces[pid].units; }
+export function findUnit(state, pid, uid) { return state.provinces[pid].units.find(u => u.uid === uid) || null; }
+// The unit a vassal leads (searching their province, or marches if they are marching).
+export function unitLedBy(state, vid) {
+  const v = state.vassals[vid];
+  if (!v) return null;
+  if (v.location != null) return state.provinces[v.location].units.find(u => u.leader === vid) || null;
+  for (const m of state.marches) { const u = m.units.find(x => x.leader === vid); if (u) return u; }
+  return null;
+}
+export function leaderOf(state, unit) { return unit && unit.leader ? state.vassals[unit.leader] || null : null; }
+
 export function houseVassals(state, house) {
   return Object.values(state.vassals).filter(v => v.house === house && v.status === 'active');
 }
@@ -110,6 +153,16 @@ export function shardsOf(state, house) {
 export function isRuler(state, vid) {
   const v = state.vassals[vid];
   return !!v && state.houses[v.house] && state.houses[v.house].ruler === vid;
+}
+
+// A spirit the house can summon this season (holds the shard, not used this season, not already
+// marching in another queued attack). `exceptQueued` false ignores queued marches.
+export function availableSpirit(state, house, exceptQueued = true) {
+  if (!house || !state.houses[house]) return null;
+  const si = seasonIndex(state);
+  const used = state.houses[house].spiritUsed;
+  const queued = exceptQueued ? new Set(state.marches.filter(m => m.house === house && m.fifth?.kind === 'spirit').map(m => m.fifth.id)) : new Set();
+  return shardsOf(state, house).find(s => used[s] !== si && !queued.has(s)) || null;
 }
 
 // Governor of a province: the ruler if present, else the vassal with the best charm.
@@ -135,40 +188,71 @@ export function atPeace(state, a, b) {
     ((x === a && y === b) || (x === b && y === a)));
 }
 
-// Combat power estimate of a unit (used by AI and the UI's strength bars).
+// ---------- strength estimates (AI and UI strength bars) ----------
+export function unitStats(type) {
+  return TROOPS[type] || COMPANIES[type] || (type === 'militia' ? MILITIA : null) ||
+    (SPIRIT_UNIT[type] ? { ...SPIRIT_UNIT[type], name: SPIRITS[type].name } : null);
+}
 export function unitPower(type, soldiers, training = 50, might = 50) {
-  const t = TROOPS[type] || COMPANIES[type] || (type === 'militia' ? MILITIA : null);
+  const t = unitStats(type);
   if (!t || soldiers <= 0) return 0;
   return soldiers * (t.atk + t.def) / 2 * (0.7 + training / 333) * (1 + might / 200) / 10;
 }
-export function vassalPower(v) { return unitPower(v.troop, v.soldiers, v.training, v.might); }
+// Power of a garrisoned/marching troop unit, with its leader's Might (leaderless units count less).
+export function troopPower(state, u) {
+  const l = leaderOf(state, u);
+  return unitPower(u.type, u.soldiers, u.training, l ? l.might : 0) * (l ? 1 : LEADERLESS_FACTOR);
+}
+export const companyPower = c => (c ? unitPower(c.type, c.soldiers, 60, 0) : 0);
+export const spiritPower = id => (id ? unitPower(id, SPIRIT_UNIT[id].soldiers, 100, 40) : 0);
+
+// The units a province would field in battle: its strongest MAX_UNITS_PER_ARMY troop units.
+export function fieldedUnits(state, pid) {
+  return [...state.provinces[pid].units].filter(u => u.soldiers > 0)
+    .sort((a, b) => troopPower(state, b) - troopPower(state, a) || (a.uid < b.uid ? -1 : 1))
+    .slice(0, MAX_UNITS_PER_ARMY);
+}
+
+// Army strength of a province (fielded units + company, or spirit if no company and a vassal).
+export function provinceArmyPower(state, pid, house = state.provinces[pid].owner) {
+  const pr = state.provinces[pid];
+  let s = fieldedUnits(state, pid).reduce((a, u) => a + troopPower(state, u), 0);
+  if (pr.company) s += companyPower(pr.company);
+  else if (pr.vassals.length) s += spiritPower(availableSpirit(state, house, false));
+  return s;
+}
 
 // Defensive strength of a province as an attacker would face it.
 export function provinceDefence(state, pid) {
   const pr = state.provinces[pid];
-  let s = provinceVassals(state, pid).reduce((a, v) => a + vassalPower(v), 0);
-  if (pr.company) s += unitPower(pr.company.type, pr.company.soldiers, 60, 50);
-  if (!pr.owner) s += unitPower('militia', pr.militia, 30, 40);
-  else if (s === 0) s += unitPower('militia', emptyMilitia(pr), 30, 40);
+  let s = provinceArmyPower(state, pid);
+  if (!pr.owner) s += pr.militia.reduce((a, n) => a + unitPower('militia', n, 30, 0), 0);
+  else if (s === 0) s += unitPower('militia', emptyMilitia(pr), 25, 0);
   return s * (pr.owner ? 1.25 : 1);   // keep walls
 }
-// An owned province with no defenders raises a levy from its people.
+// An owned province with no troops raises a levy from its people.
 export function emptyMilitia(pr) { return Math.round(20 + pr.loyalty); }
 
 export function housePower(state, house) {
-  let s = houseVassals(state, house).reduce((a, v) => a + vassalPower(v), 0);
-  for (const p of ownedProvinces(state, house)) if (p.company) s += unitPower(p.company.type, p.company.soldiers, 60, 50);
+  let s = 0;
+  for (const p of ownedProvinces(state, house)) {
+    s += p.units.reduce((a, u) => a + troopPower(state, u), 0) + companyPower(p.company);
+  }
+  for (const m of state.marches) if (m.house === house) s += m.units.reduce((a, u) => a + troopPower(state, u), 0);
   return s;
 }
 
 export function houseTotals(state, house) {
   const ps = ownedProvinces(state, house);
   const vs = houseVassals(state, house);
+  const marching = state.marches.filter(m => m.house === house);
   return {
     provinces: ps.length,
     food: ps.reduce((a, p) => a + p.food, 0),
     gold: ps.reduce((a, p) => a + p.gold, 0),
-    soldiers: vs.reduce((a, v) => a + v.soldiers, 0) + ps.reduce((a, p) => a + (p.company ? p.company.soldiers : 0), 0),
+    soldiers: ps.reduce((a, p) => a + p.units.reduce((b, u) => b + u.soldiers, 0) + (p.company ? p.company.soldiers : 0), 0) +
+      marching.reduce((a, m) => a + m.units.reduce((b, u) => b + u.soldiers, 0), 0),
+    units: ps.reduce((a, p) => a + p.units.length, 0) + marching.reduce((a, m) => a + m.units.length, 0),
     vassals: vs.length,
     shards: shardsOf(state, house),
     power: Math.round(housePower(state, house)),
@@ -177,7 +261,7 @@ export function houseTotals(state, house) {
 
 // Monthly food upkeep of the troops stationed in a province.
 export function provinceUpkeep(state, pid) {
-  return provinceVassals(state, pid).reduce((a, v) => a + v.soldiers * (TROOPS[v.troop]?.upkeep ?? 4) / 100, 0);
+  return state.provinces[pid].units.reduce((a, u) => a + u.soldiers * (TROOPS[u.type]?.upkeep ?? 4) / 100, 0);
 }
 
 export function neighbours(pid) { return ADJACENCY[pid]; }
@@ -201,6 +285,7 @@ export function addLog(state, text, kind = 'info', art) {
 export function vassalName(id) { return VASSAL_BY_ID[id]?.name ?? id; }
 export function houseName(id) { return id ? (HOUSE_BY_ID[id]?.name ?? id) : 'the free folk'; }
 export function provinceName(pid) { return PROVINCES[pid]?.name ?? String(pid); }
+export function unitName(u) { return unitStats(u.type)?.name ?? u.type; }
 
 export const isPlayerControlled = (state, house) => house === state.player && !state.autoPlayer;
 

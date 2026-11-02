@@ -1,10 +1,11 @@
 // Lanternfall wiki: everything below is generated from the game's own data modules, so the
 // wiki stays in step with the game. Rules text follows docs/DESIGN.md.
-import { PROVINCES, ADJACENCY, MAP_W, MAP_H, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, SEASONS, MONTHS, START_YEAR } from './data/world.js';
+import { PROVINCES, ADJACENCY, MAP_W, MAP_H, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, SEASONS, MONTHS, START_YEAR, SEA_LANES, isSeaLane, VICTORY_PROVINCES } from './data/world.js';
+import { landShapes, LAND_PALETTE, LAND_EDGES } from './ui/landshape.js';
 import { HOUSES, HOUSE_BY_ID, HOUSE_START } from './data/houses.js';
 import { VASSALS } from './data/vassals.js';
-import { TROOPS, COMPANIES, MILITIA, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE } from './data/units.js';
-import { SPIRITS } from './data/spirits.js';
+import { TROOPS, COMPANIES, MILITIA, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from './data/units.js';
+import { SPIRITS, SPIRIT_UNIT } from './data/spirits.js';
 import { RANDOM_EVENTS, STORY } from './data/events.js';
 import { SLOTS, loadArtManifest, art, hasArt, pad3, CREST, PROVINCE_VIGNETTE, CLASH_CUTIN, SPIRIT_CUTIN } from './data/art.js';
 
@@ -69,10 +70,13 @@ function overview() {
   ${sec('story', 'The story', 'Varenhold')}
   <div class="prose-card"><p>${esc(p.text)}</p></div>
   <p>Each house starts with two provinces and a handful of vassals. Five houses hold a shard, kept in their capital; the
-  Vey Marsh League has none and must take one. Twelve provinces are free holds, defended only by militia
+  Vey Marsh League has none and must take one. ${PROVINCES.length - HOUSES.reduce((a, h) => a + h.provinces.length, 0)} provinces are free holds, defended only by militia
   (${NEUTRAL_MILITIA.min}–${NEUTRAL_MILITIA.max} soldiers). Lanterncross, where the High Lantern stood, lies at the
   heart of the realm.</p>
-  <p><b>Victory:</b> rule 18 provinces, or hold all five shards. <b>Defeat:</b> lose your last province.</p>
+  <p>Varenhold is a land of chokepoints. The Vey marsh peninsula touches the mainland only at Lanterncross; the Frost
+  Isles, the Isle of Gulls, the Sunder Isles and Westreach are reached by a single sea lane or causeway each. Whoever
+  holds the landing holds the island.</p>
+  <p><b>Victory:</b> rule ${VICTORY_PROVINCES} of the ${PROVINCES.length} provinces, or hold all five shards. <b>Defeat:</b> lose your last province.</p>
   <figure class="frame hero" data-slot="100" style="aspect-ratio:16/6"><img src="${art(100)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('broken')">
   <figcaption>${esc(STORY.ending.title)}</figcaption></figure>`;
 }
@@ -91,10 +95,12 @@ function howToPlay() {
   <div class="xwrap"><table class="xtable">
   <tr><th>Order</th><th>What it does</th><th>Cost</th></tr>
   <tr><td><b>Develop</b></td><td>Raise Fields (food), Market (gold) or Dikes (flood defence) by 4 + governor's Wits / 20, up to 100.</td><td>30 gold</td></tr>
-  <tr><td><b>Muster</b></td><td>Add soldiers to a vassal's troop (max ${MAX_SOLDIERS} per vassal).</td><td>troop cost per 10 soldiers; loyalty −2</td></tr>
-  <tr><td><b>Train</b></td><td>Training +10 + Might / 10, up to 100. Training multiplies damage.</td><td>—</td></tr>
+  <tr><td><b>Muster</b></td><td>Raise a new troop unit of any type, or reinforce one (max ${MAX_SOLDIERS} soldiers per unit, ${MAX_UNITS_PER_PROVINCE} units per province). New units have no leader.</td><td>troop cost per 10 soldiers; loyalty −2</td></tr>
+  <tr><td><b>Train</b></td><td>Drill one unit or the whole garrison: training +10 + leader's Might / 10 (+8 with no leader), up to 100. Training multiplies damage.</td><td>—</td></tr>
+  <tr><td><b>Assign leader</b></td><td>Put a vassal at the head of a unit, or take them off it. <i>Free: does not use the month's order.</i></td><td>—</td></tr>
+  <tr><td><b>Disband</b></td><td>Send a unit home; loyalty +2.</td><td>—</td></tr>
   <tr><td><b>Hire / Dismiss</b></td><td>Hire one company for the province (or send it away).</td><td>hire fee, then a monthly wage</td></tr>
-  <tr><td><b>March</b></td><td>Move vassals (and the company) with food to a neighbouring province. Your own province: a transfer. Anyone else's: an attack. At most ${MAX_VASSALS_PER_PROVINCE} vassals per province.</td><td>food carried</td></tr>
+  <tr><td><b>March</b></td><td>Send up to ${MAX_UNITS_PER_ARMY} units, their leaders, any other vassals, and a 5th slot (the hired company or a summoned spirit) with food to a neighbouring province, over land or by sea lane. Your own province: a transfer. Anyone else's: an attack, which needs at least one vassal in command. At most ${MAX_VASSALS_PER_PROVINCE} vassals per province.</td><td>food carried</td></tr>
   <tr><td><b>Supply</b></td><td>Send food and gold to a neighbouring province you own.</td><td>—</td></tr>
   <tr><td><b>Govern</b></td><td>Feast: 20 food for loyalty +8. Tax: gold equal to Market, loyalty −10.</td><td>food / loyalty</td></tr>
   <tr><td><b>Diplomacy</b></td><td>Truce, demand tribute, marriage pact, or bribe an enemy vassal.</td><td>gold</td></tr>
@@ -137,9 +143,13 @@ function battles() {
     ['Castle wall', 1.8, 1], ['Gate', 1.4, 1], ['Water / marsh', 0.8, 2], ['Mountain', '—', 'impassable (except flyers)']];
   return `${sec('battle', 'The battlefield', 'Battles')}
   <p>A battle is fought on a <b>16 × 12</b> grid drawn from the province's terrain: woods, hills, a river with a bridge,
-  a road. The defender holds a 3 × 3 keep with a gate on the right; the attacker deploys on the left columns. Each side
-  brings up to five vassal-led troops, plus the province's company, plus a spirit if the house holds a shard and has not
-  called it yet this season. Free holds defend with militia.</p>
+  a road. The defender holds a 3 × 3 keep with a gate on the right; the attacker deploys on the left columns.</p>
+  <p>Each side fields <b>${MAX_UNITS_PER_ARMY} troop units plus a 5th slot</b>. The 5th slot is the province's hired company,
+  or a <b>summoned spirit</b> if the house holds its shard, has not called it yet this season, and a vassal is present.
+  A defender with more than ${MAX_UNITS_PER_ARMY} units fields its strongest ${MAX_UNITS_PER_ARMY}. Free holds defend with
+  one to three bands of militia, with no leader.</p>
+  <p><b>Leaders.</b> A unit led by a vassal adds the leader's Might to its blows and its defence, and Wits to its
+  archery. A unit with no leader fights at base strength and breaks sooner.</p>
   <p>The battle lasts <b>15 rounds</b>. Each round the attacker moves all its units, then the defender. A unit may move
   and then strike an adjacent enemy, or shoot at one within range; archers and engines cannot move and shoot in the same
   round.</p>
@@ -153,7 +163,9 @@ function battles() {
   ${terr.map(([n, d, m]) => `<tr><td>${n}</td><td class="num">${d}</td><td>${m}</td></tr>`).join('')}</table></div>
 
   ${sec('winning', 'Routing and taking the keep', 'Battles')}
-  <p>A unit that falls below 15% of the soldiers it started with routs and leaves the field. The attacker wins by
+  <p>A unit led by a vassal routs when it falls below ${Math.round(ROUT_LED * 100)}% of the soldiers it started with;
+  a unit with no leader routs below ${Math.round(ROUT_LEADERLESS * 100)}%. Routed units leave the field. Vassals whose
+  units are destroyed may be captured even if their army escapes. The attacker wins by
   holding the keep's centre square for a full round, or by routing every defender. If neither happens in 15 rounds,
   the defender wins.</p>
   ${sec('clashes', 'Clashes and summons', 'Battles')}
@@ -204,7 +216,7 @@ function charactersSec() {
         <div class="who"><b>${esc(v.name)}</b>${v.id === h.ruler ? '<span class="ruler-tag">RULER</span>' : ''}
         <div class="role">${esc(v.title)}</div>
         <div class="bars">${bar('Might', v.might, '#d9614a')}${bar('Wits', v.wits, '#5aa0e0')}${bar('Charm', v.charm, '#d9a94a')}${bar('Loyalty', v.loyalty, h.color)}</div>
-        <div class="troop">${v.soldiers} ${esc(t?.name ?? v.troop)} · at ${plink(v.at)}</div></div></div>`;
+        <div class="troop">Starts leading ${v.soldiers} ${esc(t?.name ?? v.troop)} · at ${plink(v.at)}</div></div></div>`;
     }).join('');
     return `<details class="group" open><summary><span class="swatch" style="background:${h.color}"></span><b>${esc(h.name)}</b>
       <span>${list.length} characters</span></summary><div class="body"><div class="people">${people}</div></div></details>`;
@@ -215,23 +227,42 @@ function charactersSec() {
 }
 
 function provinceMap() {
-  const lines = [];
-  ADJACENCY.forEach((ns, a) => ns.forEach(b => {
-    if (b > a) lines.push(`<line x1="${PROVINCES[a].x}" y1="${PROVINCES[a].y}" x2="${PROVINCES[b].x}" y2="${PROVINCES[b].y}" stroke="#6b5a40" stroke-width="3" stroke-dasharray="8 6"/>`);
-  }));
+  const pal = LAND_PALETTE[1];
+  const { circles, polys } = landShapes();
+  const layer = (grow, color) => `<g fill="${color}" stroke="${color}" stroke-linejoin="round">` +
+    circles.map(c => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${(c.r + grow).toFixed(1)}"/>`).join('') +
+    polys.map(p => `<polygon points="${p.pts.map(q => `${q.x},${q.y}`).join(' ')}" stroke-width="${grow * 2}"/>`).join('') + '</g>';
+  const roads = LAND_EDGES.map(([a, b]) => `<line x1="${PROVINCES[a].x}" y1="${PROVINCES[a].y}" x2="${PROVINCES[b].x}" y2="${PROVINCES[b].y}" stroke="#6b5a40" stroke-width="3" stroke-dasharray="8 6"/>`).join('');
+  const lanes = SEA_LANES.map(([a, b]) => {
+    const A = PROVINCES[a], B = PROVINCES[b];
+    const mx = (A.x + B.x) / 2 + (A.y - B.y) * 0.18, my = (A.y + B.y) / 2 + (B.x - A.x) * 0.18;
+    return `<path d="M${A.x} ${A.y} Q${mx} ${my} ${B.x} ${B.y}" stroke="#eaf6ff" stroke-width="3" stroke-dasharray="2 8" stroke-linecap="round" fill="none"/>` +
+      `<text x="${(A.x + 2 * mx + B.x) / 4}" y="${(A.y + 2 * my + B.y) / 4 + 6}" text-anchor="middle" class="ship">⛵</text>`;
+  }).join('');
   const nodes = PROVINCES.map(p => {
     const h = OWNER[p.id] ? HOUSE_BY_ID[OWNER[p.id]] : null;
     const cap = h && h.capital === p.id;
     return `<a href="#prov-${p.id}"><g>
-      <circle cx="${p.x}" cy="${p.y}" r="${cap ? 22 : 16}" fill="${h ? h.color : '#4a4033'}" stroke="${cap ? '#f3d27a' : '#1a1510'}" stroke-width="${cap ? 4 : 3}"/>
+      <circle cx="${p.x}" cy="${p.y}" r="${cap ? 20 : 15}" fill="${h ? h.color : '#4a4033'}" stroke="${cap ? '#f3d27a' : '#1a1510'}" stroke-width="${cap ? 4 : 3}"/>
       ${cap && h.shard ? `<circle cx="${p.x}" cy="${p.y}" r="6" fill="${SPIRITS[h.shard].color}"/>` : ''}
-      <text x="${p.x}" y="${p.y + 40}" text-anchor="middle">${esc(p.name)}</text></g></a>`;
+      <text x="${p.x}" y="${p.y + 36}" text-anchor="middle">${esc(p.name)}</text></g></a>`;
   }).join('');
   const legend = HOUSES.map(h => `<span><span class="swatch" style="background:${h.color}"></span>${esc(h.short)}</span>`).join('') +
-    `<span><span class="swatch" style="background:#4a4033"></span>Free hold</span><span>Gold ring: capital (dot: its shard)</span>`;
+    `<span><span class="swatch" style="background:#4a4033"></span>Free hold</span><span>Gold ring: capital (dot: its shard)</span><span>⛵ dotted line: sea lane</span>`;
   return `<div class="mapbox"><svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="Map of Varenhold">
-    <rect width="${MAP_W}" height="${MAP_H}" fill="#2a2319" rx="10"/>${lines.join('')}${nodes}</svg>
+    <rect width="${MAP_W}" height="${MAP_H}" fill="${pal.sea[1]}" rx="10"/>
+    ${layer(14, 'rgba(160,210,220,0.18)')}${layer(5, pal.coast)}${layer(3, pal.beach)}${layer(0, pal.land)}
+    ${roads}${lanes}${nodes}</svg>
     <div class="legend">${legend}</div></div>`;
+}
+
+const exitsOf = id => ADJACENCY[id].length;
+function routeNote(id) {
+  const sea = ADJACENCY[id].filter(n => isSeaLane(id, n));
+  const parts = [];
+  if (exitsOf(id) === 1) parts.push('dead end');
+  if (sea.length) parts.push(`sea lane to ${sea.map(n => PROVINCES[n].name).join(', ')}`);
+  return parts.join(' · ');
 }
 
 function provincesSec() {
@@ -241,12 +272,13 @@ function provincesSec() {
     return `<tr id="prov-${p.id}"><td class="num">${p.id}</td><td><b>${esc(p.name)}</b>${cap ? ' ★' : ''}</td><td>${p.terrain}</td>
       <td>${h ? `<span class="swatch" style="background:${h.color}"></span>${esc(h.short)}` : '<span style="color:var(--w-muted)">free hold</span>'}</td>
       <td>${cap && h.shard ? esc(SPIRITS[h.shard].name) : ''}</td>
-      <td>${ADJACENCY[p.id].map(plink).join(', ')}</td></tr>`;
+      <td class="num">${exitsOf(p.id)}</td><td>${ADJACENCY[p.id].map(plink).join(', ')}${routeNote(p.id) ? ` <i class="dim">(${routeNote(p.id)})</i>` : ''}</td></tr>`;
   }).join('');
   return `${sec('provinces', 'Provinces', 'The realm')}${provinceMap()}
   <div class="xwrap"><table class="xtable sortable"><thead><tr><th data-k="n">#</th><th data-k="s">Province</th><th data-k="s">Terrain</th>
-  <th data-k="s">Start owner</th><th data-k="s">Shard</th><th>Neighbours</th></tr></thead><tbody>${rows}</tbody></table></div>
-  <p class="note" style="color:var(--w-muted)">★ capital. Click a column header to sort.</p>
+  <th data-k="s">Start owner</th><th data-k="s">Shard</th><th data-k="n">Exits</th><th>Neighbours</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="note" style="color:var(--w-muted)">★ capital. <b>Exits</b> is the number of neighbouring provinces: a province
+  with one exit is a dead end, easy to hold and easy to trap. Click a column header to sort.</p>
   <details class="group" open><summary><b>Places of Varenhold</b><span>${PROVINCES.length} vignettes</span></summary>
   <div class="body"><div class="places">${PROVINCES.map(p => {
     const h = OWNER[p.id] ? HOUSE_BY_ID[OWNER[p.id]] : null;
@@ -274,7 +306,7 @@ function troopsSec() {
   }).join('');
   const m = MILITIA;
   return `${sec('troops', 'Troops', 'Armies')}
-  <p>Every vassal leads one troop of up to ${MAX_SOLDIERS} soldiers. Cost is gold per 10 soldiers mustered; upkeep is food
+  <p>A troop unit holds up to ${MAX_SOLDIERS} soldiers and may be led by one vassal (or by no one). Cost is gold per 10 soldiers mustered; upkeep is food
   per 100 soldiers per month. Range 1 is melee.</p>
   <div class="xwrap"><table class="xtable sortable"><thead><tr><th></th><th data-k="s">Troop</th><th data-k="n">Atk</th><th data-k="n">Def</th><th data-k="n">Move</th>
   <th data-k="n">Range</th><th data-k="n">Cost</th><th data-k="n">Upkeep</th><th>Bonus</th><th>Notes</th></tr></thead><tbody>${trow}</tbody></table></div>
@@ -296,12 +328,14 @@ function spiritsSec() {
       ${img(s.art, { alt: s.name })}
       <div><h3>${esc(s.name)}</h3><p class="role">${esc(s.element)} · spell: <b>${esc(s.spell)}</b></p>
       <p>${esc(s.text)}</p>
+      <p class="note">As a unit: Atk ${SPIRIT_UNIT[k].atk} · Def ${SPIRIT_UNIT[k].def} · Move ${SPIRIT_UNIT[k].move} · Range ${SPIRIT_UNIT[k].range} · essence ${SPIRIT_UNIT[k].soldiers}${SPIRIT_UNIT[k].flying ? ' · flies' : ''}</p>
       <p class="note">Shard held by ${holder ? `<a href="#house-${holder.id}">${esc(holder.name)}</a> in ${plink(holder.capital)}` : 'no one'}.</p></div>
       ${img(s.fx, { style: 'width:72px;height:72px;margin-left:auto', alt: s.spell + ' effect' })}</div>`;
   }).join('');
   return `${sec('spirits', 'Spirits', 'Armies')}
-  <p>A house holding a spirit's shard can call the spirit into one battle per season, if one of its vassals fights there.
-  The spirit casts its spell once in that battle. A shard sits in its province: take the province and you take the shard.</p>
+  <p>A house holding a spirit's shard can summon the spirit into one battle per season as the army's <b>5th unit</b>,
+  if one of its vassals fights there. The spirit fights on the board like any unit, casts its spell once in that battle,
+  and is banished (leaves the field) if its essence falls too low. A shard sits in its province: take the province and you take the shard.</p>
   <div class="cards">${cards}</div>`;
 }
 

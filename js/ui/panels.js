@@ -1,17 +1,17 @@
 // Realm screen panels: top bar, province panel with orders and order dialogs, houses overview,
 // chronicle. The app object passed in provides: state (getter), apply(order) -> result,
 // refresh(), endMonth(), openMenu(), openSettings(), map (MapView).
-import { PROVINCES, MONTHS, SEASONS, seasonOf } from '../data/world.js';
+import { PROVINCES, MONTHS, SEASONS, seasonOf, ADJACENCY as ADJ } from '../data/world.js';
 import { HOUSES, HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
-import { TROOPS, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE } from '../data/units.js';
-import { SPIRITS } from '../data/spirits.js';
+import { TROOPS, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, MAX_UNITS_PER_ARMY } from '../data/units.js';
+import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { art, PROVINCE_VIGNETTE, ORDER_BACKDROP } from '../data/art.js';
 import {
   provinceVassals, governorOf, houseTotals, canSee, captivesOf, atPeace, pairKey, provinceDefence,
-  vassalPower, unitPower, ownedProvinces, envoyOf,
+  ownedProvinces, envoyOf, troopPower, companyPower, spiritPower, leaderOf, unitName,
 } from '../realm/state.js';
-import { listOrders, musterCost, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentForeign, adjacentOwn } from '../realm/orders.js';
+import { listOrders, musterCost, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions } from '../realm/orders.js';
 import { forecast } from '../realm/economy.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
@@ -19,12 +19,15 @@ import { modal, toast } from './events.js';
 import { sfx } from './audio.js';
 
 const SEASON_BANNER = [4, 5, 6, 7];
-const ORDER_ICON = { develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', rest: '☾' };
+const ORDER_ICON = { develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', rest: '☾' };
 const ORDER_HINT = {
   develop: 'Fields, market or dikes', govern: 'Feast or tax', muster: 'Raise soldiers', train: 'Drill the troops',
   hire: 'Sign a company', dismiss: 'Pay off the company', march: 'Move or attack', supply: 'Send food and gold',
-  diplomacy: 'Truce, pact, bribe', spy: 'Scout a province', recruit: 'Win over a captive', rest: 'Do nothing',
+  diplomacy: 'Truce, pact, bribe', spy: 'Scout a province', recruit: 'Win over a captive', disband: 'Send a unit home',
+  rest: 'Do nothing',
 };
+const militiaOf = pr => Array.isArray(pr.militia) ? pr.militia.reduce((a, n) => a + n, 0) : (pr.militia || 0);
+const soldiersOf = pr => (pr.units || []).reduce((a, u) => a + u.soldiers, 0);
 const pct = x => Math.round(x * 100) + '%';
 
 export class RealmUI {
@@ -139,7 +142,7 @@ export class RealmUI {
       frag.append(h('div.vassal', { style: { cursor: 'pointer' }, onclick: () => { this.app.map.centerOn(p.id); this.app.select(p.id); } },
         gov ? portrait(gov.id, { size: 44 }) : h('div', { style: { width: '44px', textAlign: 'center', fontSize: '24px' } }, '🏰'),
         h('div', h('div.nm', PROVINCES[p.id].name, p.ordered ? h('span', { style: { color: 'var(--good)', marginLeft: '6px' } }, '✓') : ''),
-          h('div.mini', h('span', '🪙 ', h('b', fmt(p.gold))), h('span', '🌾 ', h('b', fmt(p.food))), h('span', 'Loyalty ', h('b', p.loyalty)), h('span', 'Vassals ', h('b', p.vassals.length))))));
+          h('div.mini', h('span', '🪙 ', h('b', fmt(p.gold))), h('span', '🌾 ', h('b', fmt(p.food))), h('span', 'Loyalty ', h('b', p.loyalty)), h('span', 'Units ', h('b', p.units.length)), h('span', 'Vassals ', h('b', p.vassals.length))))));
     }
     return frag;
   }
@@ -170,25 +173,31 @@ export class RealmUI {
     frag.append(h('div.res-row',
       res('Gold', pr.gold, fc ? fc.gold : null),
       res('Food', pr.food, fc ? fc.food : null, fc && st.month <= 6 ? `harvest +${fc.harvest}` : null),
-      pr.owner ? null : res('Militia', pr.militia)));
+      pr.owner ? res('Soldiers', soldiersOf(pr)) : res('Militia', militiaOf(pr))));
 
     const bars = h('div.stats');
     const bar = (lbl, v, cls = '') => bars.append(h('span.lbl', lbl), h('div.bar' + (cls ? '.' + cls : ''), h('i', { style: { width: v + '%' } })), h('span', v));
     bar('Fields', pr.fields); bar('Market', pr.market); bar('Dikes', pr.dikes, 'dike'); bar('Loyalty', pr.loyalty, 'loy');
     frag.append(h('div.parchment', { style: { '--parchment-img': `url(${art(3)})` } }, bars));
 
-    // vassals
+    // troop units
     const vs = provinceVassals(st, pid);
-    frag.append(h('div.section-title', `Vassals ${vs.length}/${MAX_VASSALS_PER_PROVINCE}`));
-    if (!vs.length) frag.append(h('p.hint', pr.owner ? 'No vassal is stationed here.' : `${pr.militia} militia guard this free hold.`));
-    for (const v of vs) frag.append(vassalRow(st, v));
+    frag.append(h('div.section-title', `Units ${pr.units.length}/${MAX_UNITS_PER_PROVINCE}`));
+    if (!pr.units.length) frag.append(h('p.hint', pr.owner ? 'No troops are stationed here. Muster a unit to defend it.'
+      : `${militiaOf(pr)} militia guard this free hold${Array.isArray(pr.militia) && pr.militia.length > 1 ? ` in ${pr.militia.length} bands` : ''}.`));
+    for (const u of pr.units) frag.append(unitRow(st, pid, u, mine ? () => this.openAssign(pid, u.uid) : null));
     if (pr.company) {
       const c = COMPANIES[pr.company.type];
-      frag.append(h('div.vassal', h('img', { src: art(c.sprite), style: { width: '48px', height: '48px', objectFit: 'contain' } }),
-        h('div', h('div.nm', c.name), h('div.ti', 'Hired company'), h('div.mini', h('span', 'Soldiers ', h('b', pr.company.soldiers)), h('span', 'Wage ', h('b', c.wage + 'g/mo'))))));
+      frag.append(h('div.vassal.unit-row', h('img', { src: art(c.sprite), style: { width: '48px', height: '48px', objectFit: 'contain' } }),
+        h('div', h('div.nm', c.name, h('span.slot5', '5th slot')), h('div.ti', 'Hired company'), h('div.mini', h('span', 'Soldiers ', h('b', pr.company.soldiers)), h('span', 'Wage ', h('b', c.wage + 'g/mo'))))));
     }
+    // vassals
+    frag.append(h('div.section-title', `Vassals ${vs.length}/${MAX_VASSALS_PER_PROVINCE}`));
+    if (!vs.length) frag.append(h('p.hint', pr.owner ? 'No vassal is stationed here. Units can hold the province, but only a vassal can lead an attack.' : 'No lord rules this free hold.'));
+    for (const v of vs) frag.append(vassalRow(st, v, pr.units.find(u => u.leader === v.id)));
     const marching = (st.marches || []).filter(m => m.from === pid && m.house === st.player);
-    for (const m of marching) frag.append(h('div.ordered-note', { style: { marginTop: '6px' } }, `🚩 ${m.vassals.length} vassal(s) marching on ${PROVINCES[m.to].name}.`));
+    for (const m of marching) frag.append(h('div.ordered-note', { style: { marginTop: '6px' } },
+      `🚩 ${m.units.length} unit(s)${m.vassals.length ? `, ${m.vassals.length} vassal(s)` : ''}${m.fifth ? ` and the ${m.fifth.kind === 'spirit' ? SPIRITS[m.fifth.id].name : COMPANIES[m.fifth.type]?.name || 'company'}` : ''} marching on ${PROVINCES[m.to].name}.`));
 
     if (mine) frag.append(this.ordersBlock(pid));
     else if (pr.owner) {
@@ -251,43 +260,105 @@ export class RealmUI {
     }), { backdrop: ORDER_BACKDROP.throne });
   }
 
+  // Free action: choose who leads a unit.
+  async openAssign(pid, uid) {
+    const st = this.state, pr = st.provinces[pid];
+    const u = pr.units.find(x => x.uid === uid);
+    if (!u) return;
+    const vs = provinceVassals(st, pid);
+    const choice = await modal(close => ({
+      title: `Leader for the ${unitName(u).toLowerCase()}`,
+      body: [h('p.hint', 'Assigning a leader is free and does not use the month\'s order. A leader adds Might to attack and defence, Wits to archery and drills; units with no leader break sooner (below 40% instead of 30%).'),
+        h('div.pick-list',
+          ...vs.map(v => {
+            const leads = pr.units.find(x => x.leader === v.id);
+            return h('button.target' + (u.leader === v.id ? '.on' : ''), { style: { display: 'grid', gridTemplateColumns: '44px 1fr', gap: '10px', alignItems: 'center' }, onclick: () => close({ vassal: v.id }) },
+              portrait(v.id, { size: 40 }), h('div', h('div.nm', VASSAL_BY_ID[v.id].name), h('div.meta', `Might ${v.might} · Wits ${v.wits}` + (leads && leads !== u ? ` · now leads the ${unitName(leads).toLowerCase()}` : leads === u ? ' · leading this unit' : ''))));
+          }),
+          h('button.target' + (!u.leader ? '.on' : ''), { onclick: () => close({ vassal: null }) }, h('div.nm', 'No leader'), h('div.meta', 'The unit fights on its own')))],
+      foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel')],
+    }));
+    if (!choice || choice.vassal === (u.leader ?? null)) return;
+    this.app.apply({ type: 'assign', province: pid, unit: uid, vassal: choice.vassal });
+  }
+
   dlg_muster(pid) {
     const st = this.state, pr = st.provinces[pid];
-    const vs = provinceVassals(st, pid);
-    let vid = (vs.find(v => v.soldiers < MAX_SOLDIERS) || vs[0]).id;
+    const mo = musterOptions(st, pid);
+    // target: { kind: 'new', type } or { kind: 'add', uid }
+    let target = mo.canRaise ? { kind: 'new', type: 'footmen' } : mo.units[0] ? { kind: 'add', uid: mo.units[0].uid } : null;
     return modal(close => {
       const out = h('output');
       const cost = h('span');
-      const range = h('input', { type: 'range', min: 10, step: 10, max: 10, value: 10 });
+      const range = h('input', { type: 'range', min: 10, step: 10, max: MAX_SOLDIERS });
+      range.value = 100;
+      const go = h('button.btn.primary', 'Muster');
+      const typeOf = () => target.kind === 'new' ? target.type : pr.units.find(u => u.uid === target.uid).type;
+      const room = () => target.kind === 'new' ? MAX_SOLDIERS : MAX_SOLDIERS - pr.units.find(u => u.uid === target.uid).soldiers;
       const sync = () => {
-        const v = st.vassals[vid];
-        const max = Math.max(10, Math.min(MAX_SOLDIERS - v.soldiers, Math.floor(pr.gold / TROOPS[v.troop].cost) * 10));
+        box.querySelectorAll('.target').forEach(b => b.classList.toggle('on', b.dataset.k === (target.kind === 'new' ? 'new:' + target.type : 'add:' + target.uid)));
+        const t = typeOf();
+        const max = Math.max(10, Math.min(room(), Math.floor(pr.gold / TROOPS[t].cost) * 10));
         range.max = max;
         if (+range.value > max) range.value = max;
         out.textContent = range.value;
-        cost.textContent = `${musterCost(v.troop, +range.value)} gold of ${pr.gold} · ${v.soldiers} → ${v.soldiers + +range.value} ${TROOPS[v.troop].name.toLowerCase()}`;
+        const have = target.kind === 'new' ? 0 : pr.units.find(u => u.uid === target.uid).soldiers;
+        cost.textContent = `${musterCost(t, +range.value)} gold of ${pr.gold} · ${target.kind === 'new' ? 'new unit of ' : `${have} → ${have + +range.value} `}${TROOPS[t].name.toLowerCase()}`;
+        go.disabled = musterCost(t, +range.value) > pr.gold;
       };
       range.addEventListener('input', sync);
-      const picks = vassalPicker(st, vs, 'radio', [vid], ids => { vid = ids[0]; sync(); });
+      const box = h('div');
+      if (mo.canRaise) {
+        box.append(h('div.field', h('label', 'Raise a new unit'), h('div.target-grid', ...mo.types.map(t =>
+          h('button.target', { 'data-k': 'new:' + t.type, onclick: () => { target = { kind: 'new', type: t.type }; sync(); } },
+            h('img', { src: art(TROOPS[t.type].sprite), style: { width: '100%', height: '54px', objectFit: 'contain' } }),
+            h('div.nm', t.name), h('div.meta', `${t.costPer10}g per 10 · atk ${TROOPS[t.type].atk} def ${TROOPS[t.type].def}`))))));
+      } else box.append(h('p.hint', `This province already has ${MAX_UNITS_PER_PROVINCE} units: reinforce one instead.`));
+      if (mo.units.length) {
+        box.append(h('div.field', h('label', 'Or reinforce a unit'), h('div.target-grid', ...mo.units.map(u => {
+          const unit = pr.units.find(x => x.uid === u.uid), l = leaderOf(st, unit);
+          return h('button.target', { 'data-k': 'add:' + u.uid, onclick: () => { target = { kind: 'add', uid: u.uid }; sync(); } },
+            h('div.nm', u.name), h('div.meta', `${u.soldiers} soldiers · room ${u.room}`), h('div.meta', l ? 'Led by ' + VASSAL_BY_ID[l.id].name : 'No leader'));
+        }))));
+      }
+      go.addEventListener('click', () => close(target.kind === 'new'
+        ? { type: 'muster', province: pid, troop: target.type, soldiers: +range.value }
+        : { type: 'muster', province: pid, unit: target.uid, soldiers: +range.value }));
       setTimeout(sync);
       return {
         title: 'Muster troops',
-        body: [picks, h('div.field', h('label', 'Soldiers'), h('div.range-row', range, out)), h('p.hint', cost)],
-        foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'),
-          h('button.btn.primary', { onclick: () => close({ type: 'muster', province: pid, vassal: vid, soldiers: +range.value }) }, 'Muster')],
+        body: [box, h('div.field', h('label', 'Soldiers'), h('div.range-row', range, out)), h('p.hint', cost)],
+        foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'), go],
       };
-    }, { backdrop: ORDER_BACKDROP.muster });
+    }, { wide: true, backdrop: ORDER_BACKDROP.muster });
   }
 
   dlg_train(pid) {
-    const st = this.state;
-    const vs = provinceVassals(st, pid);
+    const st = this.state, pr = st.provinces[pid];
     return modal(close => ({
       title: 'Train troops',
-      body: [h('p.hint', 'All vassals here drill together. Training raises fighting strength.'),
-        ...vs.map(v => h('div.vassal', portrait(v.id, { size: 44 }), h('div', h('div.nm', VASSAL_BY_ID[v.id].name), h('div.mini', `Training ${v.training} → ${Math.min(100, v.training + trainGain(v))}`))))],
-      foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'), h('button.btn.primary', { onclick: () => close({ type: 'train', province: pid }) }, 'Drill')],
+      body: [h('p.hint', 'Drill one unit hard, or the whole garrison. A leader\'s Might speeds the drill.'),
+        h('div.pick-list',
+          h('button.target', { onclick: () => close({ type: 'train', province: pid }) }, h('div.nm', 'Drill every unit'), h('div.meta', `${pr.units.length} units`)),
+          ...pr.units.map(u => {
+            const l = leaderOf(st, u);
+            return h('button.target', { style: { display: 'grid', gridTemplateColumns: '44px 1fr', gap: '10px', alignItems: 'center' }, onclick: () => close({ type: 'train', province: pid, unit: u.uid }) },
+              l ? portrait(l.id, { size: 40 }) : h('img', { src: art(TROOPS[u.type]?.sprite || 63), style: { width: '40px', height: '40px', objectFit: 'contain' } }),
+              h('div', h('div.nm', `${unitName(u)} (${u.soldiers})`), h('div.meta', `Training ${u.training} → ${Math.min(100, u.training + trainGain(l))}` + (l ? ` · led by ${VASSAL_BY_ID[l.id].name}` : ' · no leader'))));
+          }))],
+      foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel')],
     }), { backdrop: ORDER_BACKDROP.train });
+  }
+
+  dlg_disband(pid) {
+    const st = this.state, pr = st.provinces[pid];
+    return modal(close => ({
+      title: 'Disband a unit',
+      body: [h('p.hint', 'The soldiers go home to their fields. The people are glad (loyalty +2).'),
+        h('div.pick-list', ...pr.units.map(u => h('button.target', { onclick: () => close({ type: 'disband', province: pid, unit: u.uid }) },
+          h('div.nm', `${unitName(u)} (${u.soldiers})`), h('div.meta', leaderOf(st, u) ? 'Led by ' + VASSAL_BY_ID[u.leader].name : 'No leader'))))],
+      foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel')],
+    }));
   }
 
   dlg_hire(pid) {
@@ -304,31 +375,110 @@ export class RealmUI {
 
   dlg_march(pid) {
     const st = this.state, pr = st.provinces[pid];
-    const vs = provinceVassals(st, pid);
-    const targets = [...adjacentForeign(st, pid), ...adjacentOwn(st, pid)];
-    let to = null, chosen = vs.filter(v => v.soldiers > 0).slice(0, MAX_MARCH).map(v => v.id);
+    const mo = marchOptions(st, pid);
+    const attackSet = new Set(mo.targets.attack), sea = new Set(mo.targets.seaLanes);
+    const targets = [...mo.targets.attack, ...mo.targets.transfer];
+    let to = null;
+    // default: the 4 strongest units with their leaders
+    let units = [...mo.units].sort((a, b) => b.power - a.power).slice(0, mo.maxUnits).map(u => u.uid);
+    let extra = [];                      // vassals marching without leading a unit
+    let fifth = null;                    // 'company' | 'spirit' | null
     this.app.map.setHighlights(targets);
+    const leadersOf = ids => ids.map(id => mo.units.find(u => u.uid === id)?.leader).filter(Boolean);
     return modal(close => {
       const compare = h('div');
+      const warn = h('div');
       const foodR = h('input', { type: 'range', min: 0, max: pr.food, step: 10, value: Math.min(pr.food, 60) });
       const foodOut = h('output', foodR.value);
       foodR.addEventListener('input', () => { foodOut.textContent = foodR.value; });
-      const comp = pr.company ? h('input', { type: 'checkbox', checked: true }) : null;
       const go = h('button.btn.primary', { disabled: true }, 'March');
+      const unitBox = h('div.pick-list'), vasBox = h('div.pick-list'), fifthBox = h('div.target-grid');
+
+      const drawUnits = () => {
+        unitBox.innerHTML = '';
+        for (const u of mo.units) {
+          const on = units.includes(u.uid);
+          const input = h('input', { type: 'checkbox', checked: on });
+          input.addEventListener('change', () => {
+            if (input.checked) {
+              if (units.length >= mo.maxUnits) { input.checked = false; toast(`An army takes at most ${mo.maxUnits} units (plus the 5th slot).`, true); return; }
+              units.push(u.uid);
+            } else units = units.filter(x => x !== u.uid);
+            extra = extra.filter(v => !leadersOf(units).includes(v));
+            sync();
+          });
+          unitBox.append(h('label.pick', input,
+            u.leader ? portrait(u.leader, { size: 40 }) : h('img', { src: art(TROOPS[u.type]?.sprite || 63), style: { width: '40px', height: '40px', objectFit: 'contain' } }),
+            h('div', h('div.nm', { style: { fontWeight: 600 } }, `${u.name} · ${u.soldiers}`),
+              h('div.hint', { style: { fontStyle: 'normal' } }, (u.leader ? `Led by ${VASSAL_BY_ID[u.leader].name}` : 'No leader') + ` · training ${u.training} · power ${fmt(u.power)}`))));
+        }
+        if (!mo.units.length) unitBox.append(h('p.hint', 'No troop units here.'));
+      };
+      const drawVassals = () => {
+        vasBox.innerHTML = '';
+        const leading = new Set(leadersOf(units));
+        const free = mo.vassals.filter(v => !leading.has(v.id));
+        for (const v of mo.vassals.filter(v => leading.has(v.id))) {
+          vasBox.append(h('div.pick', h('span', '✓'), portrait(v.id, { size: 32 }), h('div', h('div.nm', VASSAL_BY_ID[v.id].name), h('div.hint', { style: { fontStyle: 'normal' } }, 'Marches with the unit they lead'))));
+        }
+        for (const v of free) {
+          const input = h('input', { type: 'checkbox', checked: extra.includes(v.id) });
+          input.addEventListener('change', () => { extra = input.checked ? [...extra, v.id] : extra.filter(x => x !== v.id); sync(); });
+          vasBox.append(h('label.pick', input, portrait(v.id, { size: 32 }), h('div', h('div.nm', VASSAL_BY_ID[v.id].name),
+            h('div.hint', { style: { fontStyle: 'normal' } }, v.leads ? 'Leads a unit that stays behind' : 'Not leading a unit: commands the army'))));
+        }
+        if (!mo.vassals.length) vasBox.append(h('p.hint', 'No vassal is here.'));
+      };
+      const drawFifth = () => {
+        fifthBox.innerHTML = '';
+        const anyVassal = leadersOf(units).length + extra.length > 0;
+        const opt = (k, title, meta, pic, disabled) => {
+          const b = h('button.target' + (fifth === k ? '.on' : ''), { disabled: !!disabled, title: disabled || '', onclick: () => { fifth = k; sync(); } },
+            pic || null, h('div.nm', title), h('div.meta', disabled || meta));
+          fifthBox.append(b);
+        };
+        opt(null, 'None', 'Four units only');
+        const comp = mo.fifth.find(f => f.kind === 'company');
+        if (comp) opt('company', COMPANIES[comp.type].name, `Hired company · ${comp.soldiers}`, h('img', { src: art(COMPANIES[comp.type].sprite), style: { width: '100%', height: '54px', objectFit: 'contain' } }));
+        else opt('company', 'Company', '', null, 'No company is hired here.');
+        const sp = mo.fifth.find(f => f.kind === 'spirit');
+        const shards = houseTotals(st, st.player).shards;
+        if (sp) {
+          const S = SPIRITS[sp.id], U = SPIRIT_UNIT[sp.id];
+          opt('spirit', S.name, `Summon · atk ${U.atk} def ${U.def} · ${S.spell}`,
+            h('img', { src: art(S.art), style: { width: '100%', height: '54px', objectFit: 'cover', borderRadius: '4px', boxShadow: `0 0 10px ${S.color}` } }),
+            anyVassal ? null : 'A vassal must march to summon it.');
+        } else opt('spirit', 'Spirit', '', null, shards.length ? 'Your spirits have been called this season.' : 'You hold no Lantern Shard.');
+        if (fifth === 'spirit' && (!sp || !anyVassal)) fifth = null;
+        if (fifth === 'company' && !comp) fifth = null;
+      };
       const sync = () => {
-        go.disabled = to == null || !chosen.length;
-        compare.innerHTML = '';
+        drawUnits(); drawVassals(); drawFifth();
+        const vassals = [...new Set([...leadersOf(units), ...extra])];
+        compare.innerHTML = ''; warn.innerHTML = '';
+        const hasForce = units.length || vassals.length || fifth;
+        go.disabled = to == null || !hasForce;
         if (to == null) return;
         const tp = st.provinces[to];
-        const ours = chosen.reduce((a, id) => a + vassalPower(st.vassals[id]), 0) + (comp && comp.checked ? unitPower(pr.company.type, pr.company.soldiers, 60, 50) : 0);
-        if (tp.owner === st.player) { go.textContent = 'Move'; compare.append(h('p.hint', `Move to ${PROVINCES[to].name} (room for ${MAX_VASSALS_PER_PROVINCE - tp.vassals.length}).`)); return; }
+        if (!attackSet.has(to)) {
+          go.textContent = 'Move';
+          compare.append(h('p.hint', `Move to ${PROVINCES[to].name}${sea.has(to) ? ' by sea' : ''} (room for ${Math.max(0, MAX_UNITS_PER_PROVINCE - tp.units.length)} more units).`));
+          return;
+        }
         go.textContent = 'Attack';
+        if (!vassals.length) {
+          go.disabled = true;
+          warn.append(h('p.warn', '⚠ An attack needs at least one vassal in command. Pick a unit with a leader, or add a vassal.'));
+        }
+        const ours = units.reduce((a, id) => a + (mo.units.find(u => u.uid === id)?.power || 0), 0) +
+          (fifth === 'company' && pr.company ? companyPower(pr.company) : 0) +
+          (fifth === 'spirit' ? spiritPower(mo.fifth.find(f => f.kind === 'spirit')?.id) : 0);
         const seen = canSee(st, st.player, to);
         const theirs = seen ? provinceDefence(st, to) : null;
         compare.append(h('div.compare',
-          h('div', h('div.hint', 'Your force'), h('div.side-v', fmt(ours))),
+          h('div', h('div.hint', 'Your army'), h('div.side-v', fmt(Math.round(ours)))),
           h('div', '⚔'),
-          h('div', h('div.hint', PROVINCES[to].name), h('div.side-v', theirs == null ? '?' : fmt(theirs)))));
+          h('div', h('div.hint', PROVINCES[to].name + (sea.has(to) ? ' (by sea)' : '')), h('div.side-v', theirs == null ? '?' : fmt(Math.round(theirs))))));
         if (theirs != null) {
           const r = ours / Math.max(1, theirs);
           compare.append(h('p.hint', { style: { textAlign: 'center' } }, r > 1.6 ? 'Your captains are confident.' : r > 1.05 ? 'An even fight, slightly in your favour.' : r > 0.7 ? 'A risky battle.' : 'Your captains urge caution.'));
@@ -336,20 +486,22 @@ export class RealmUI {
       };
       const tg = h('div.target-grid', ...targets.map(t => {
         const tp = st.provinces[t];
-        const peace = tp.owner && tp.owner !== st.player && atPeace(st, st.player, tp.owner);
-        const b = h('button.target', { disabled: peace, '--hc': houseColor(tp.owner), onclick: () => { to = t; tg.querySelectorAll('.target').forEach(x => x.classList.remove('on')); b.classList.add('on'); this.app.map.select(t); sync(); } },
-          h('div.nm', PROVINCES[t].name), h('div.meta', tp.owner === st.player ? 'Your province' : (tp.owner ? HOUSE_BY_ID[tp.owner].short : 'Free hold') + (peace ? ' · at peace' : '')));
+        const b = h('button.target', { '--hc': houseColor(tp.owner), onclick: () => { to = t; tg.querySelectorAll('.target').forEach(x => x.classList.remove('on')); b.classList.add('on'); this.app.map.select(t); sync(); } },
+          h('div.nm', PROVINCES[t].name, sea.has(t) ? ' ⛵' : ''), h('div.meta', tp.owner === st.player ? 'Your province' : (tp.owner ? HOUSE_BY_ID[tp.owner].short : 'Free hold')));
         return b;
       }));
-      const picker = vassalPicker(st, vs, 'checkbox', chosen, ids => { chosen = ids.slice(0, MAX_MARCH); sync(); });
-      if (comp) comp.addEventListener('change', sync);
-      go.addEventListener('click', () => close({ type: 'march', from: pid, province: pid, to, vassals: chosen, company: comp ? comp.checked : false, food: +foodR.value }));
+      // provinces at peace are not attack targets; show them disabled for clarity
+      const peaceful = adjacentOwnOrPeace(st, pid, targets);
+      for (const t of peaceful) tg.append(h('button.target', { disabled: true }, h('div.nm', PROVINCES[t].name), h('div.meta', 'At peace')));
+      go.addEventListener('click', () => close({ type: 'march', from: pid, province: pid, to, units, vassals: [...new Set([...leadersOf(units), ...extra])], fifth, food: +foodR.value }));
       setTimeout(sync);
       return {
         title: 'March from ' + PROVINCES[pid].name,
-        body: [h('div.field', h('label', 'Destination'), tg), h('div.field', h('label', `Vassals (up to ${MAX_MARCH})`), picker),
-          comp ? h('label.pick', { style: { gridTemplateColumns: 'auto 1fr' } }, comp, `Bring the ${COMPANIES[pr.company.type].name}`) : null,
-          h('div.field', h('label', 'Food carried'), h('div.range-row', foodR, foodOut)), compare],
+        body: [h('div.field', h('label', 'Destination'), tg),
+          h('div.field', h('label', `Units (up to ${mo.maxUnits})`), unitBox),
+          h('div.field', h('label', 'Vassals'), vasBox),
+          h('div.field', h('label', '5th slot'), fifthBox),
+          h('div.field', h('label', 'Food carried'), h('div.range-row', foodR, foodOut)), warn, compare],
         foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'), go],
       };
     }, { wide: true }).finally(() => { this.app.map.setHighlights(null); this.app.map.select(this.selected); });
@@ -457,7 +609,7 @@ export class RealmUI {
         alive ? portrait(st.houses[hs.id].ruler, { size: 44 }) : crestImg(hs.id, 40),
         h('div',
           h('div.nm', hs.name, hs.id === st.player ? ' (you)' : ''),
-          h('div.meta', alive ? `${t.provinces} provinces · ${t.vassals} vassals · ${fmt(t.soldiers)} soldiers` : 'Fallen'),
+          h('div.meta', alive ? `${t.provinces} provinces · ${t.units ?? 0} units · ${t.vassals} vassals · ${fmt(t.soldiers)} soldiers` : 'Fallen'),
           alive ? h('div.power-bar', h('i', { style: { width: (t.power / max * 100) + '%' } })) : null,
           t.shards.length ? h('div.meta', t.shards.map(s => '◆ ' + SPIRITS[s].name).join('  ')) : null),
         h('div.rel', hs.id === st.player ? '' : relation(st, st.player, hs.id) || '')));
@@ -486,7 +638,22 @@ function res(k, v, d, extra) {
     extra ? h('div.d', extra) : null);
 }
 
-function vassalRow(st, v) {
+function unitRow(st, pid, u, onAssign) {
+  const t = TROOPS[u.type];
+  const l = leaderOf(st, u);
+  return h('div.vassal.unit-row',
+    l ? portrait(l.id, { size: 48 }) : h('div.no-leader', h('img', { src: art(t?.sprite || 63), alt: '' })),
+    h('div',
+      h('div.nm', `${unitName(u)}`, h('span.count', u.soldiers)),
+      h('div.ti', l ? `Led by ${VASSAL_BY_ID[l.id].name}` : 'No leader'),
+      h('div.mini',
+        h('span', 'Trn ', h('b', u.training)),
+        h('span', 'Power ', h('b', fmt(Math.round(troopPower(st, u))))),
+        h('div.bar.strength', h('i', { style: { width: Math.round(u.soldiers / MAX_SOLDIERS * 100) + '%' } })))),
+    onAssign ? h('button.btn.small', { onclick: onAssign, title: 'Free action' }, l ? 'Change' : 'Assign') : null);
+}
+
+function vassalRow(st, v, leads) {
   const V = VASSAL_BY_ID[v.id];
   const ruler = st.houses[v.house]?.ruler === v.id;
   return h('div.vassal' + (ruler ? '.ruler' : ''),
@@ -495,27 +662,16 @@ function vassalRow(st, v) {
       h('div.nm', V.name),
       h('div.ti', V.title),
       h('div.mini',
-        h('span', TROOPS[v.troop].name, ' ', h('b', v.soldiers)),
-        h('span', 'Trn ', h('b', v.training)),
+        h('span', leads ? `Leads ${unitName(leads).toLowerCase()} (${leads.soldiers})` : h('i', 'Unassigned')),
         h('span', 'Loy ', h('b', v.loyalty)),
         h('span', { title: 'Might / Wits / Charm' }, h('b', `${v.might}/${v.wits}/${v.charm}`)))));
 }
 
-function vassalPicker(st, vs, kind, selected, onChange) {
-  const sel = new Set(selected);
-  const box = h('div.pick-list');
-  for (const v of vs) {
-    const input = h('input', { type: kind, name: 'vp', checked: sel.has(v.id) });
-    input.addEventListener('change', () => {
-      if (kind === 'radio') { sel.clear(); sel.add(v.id); }
-      else if (input.checked) sel.add(v.id); else sel.delete(v.id);
-      if (kind === 'checkbox' && sel.size > MAX_MARCH) { sel.delete(v.id); input.checked = false; toast(`At most ${MAX_MARCH} vassals march together.`, true); }
-      onChange([...sel]);
-    });
-    box.append(h('label.pick', input, portrait(v.id, { size: 40 }),
-      h('div', h('div.nm', { style: { fontWeight: 600 } }, VASSAL_BY_ID[v.id].name), h('div.hint', { style: { fontStyle: 'normal' } }, `${TROOPS[v.troop].name} ${v.soldiers} · training ${v.training}`))));
-  }
-  return box;
+// Neighbouring provinces of houses at peace with the player (shown disabled in the march dialog).
+function adjacentOwnOrPeace(st, pid, already) {
+  const have = new Set(already);
+  return ADJ[pid].filter(t => !have.has(t) && st.provinces[t].owner && st.provinces[t].owner !== st.player &&
+    atPeace(st, st.player, st.provinces[t].owner));
 }
 
 export function relation(st, a, b) {

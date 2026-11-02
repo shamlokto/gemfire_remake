@@ -5,6 +5,7 @@ import { newGame, stateHash, ownedProvinces, aliveHouses } from '../js/realm/sta
 import { endMonth } from '../js/realm/turn.js';
 import { HOUSES } from '../js/data/houses.js';
 import { getAutoResolve } from './_resolver.mjs';
+import { MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../js/data/units.js';
 
 const N = Number(process.argv[2] || 12);
 const YEARS = Number(process.argv[3] || 60);
@@ -31,18 +32,32 @@ async function campaign(seed) {
 }
 
 function checkInvariants(s) {
+  const seenUid = new Set();
   for (const p of s.provinces) {
-    if (p.vassals.length > 5) throw new Error(`province ${p.id} has ${p.vassals.length} vassals`);
+    if (p.vassals.length > MAX_VASSALS_PER_PROVINCE) throw new Error(`province ${p.id} has ${p.vassals.length} vassals`);
+    if (p.units.length > MAX_UNITS_PER_PROVINCE) throw new Error(`province ${p.id} has ${p.units.length} units`);
+    if (p.owner && p.militia.length) throw new Error(`owned province ${p.id} has militia`);
+    if (!p.owner && p.units.length) throw new Error(`free hold ${p.id} has units`);
     for (const id of p.vassals) {
       const v = s.vassals[id];
       if (v.location !== p.id || v.status !== 'active') throw new Error(`vassal ${id} misplaced`);
       if (v.house !== p.owner) throw new Error(`vassal ${id} of ${v.house} in ${p.owner}'s province ${p.id}`);
     }
+    const leaders = new Set();
+    for (const u of p.units) {
+      if (seenUid.has(u.uid)) throw new Error(`duplicate unit ${u.uid}`);
+      seenUid.add(u.uid);
+      if (!(u.soldiers > 0) || u.soldiers > MAX_SOLDIERS) throw new Error(`unit ${u.uid} soldiers ${u.soldiers}`);
+      if (u.leader) {
+        if (!p.vassals.includes(u.leader)) throw new Error(`unit ${u.uid} in ${p.id} led by absent ${u.leader}`);
+        if (leaders.has(u.leader)) throw new Error(`${u.leader} leads two units`);
+        leaders.add(u.leader);
+      }
+    }
     for (const k of ['food', 'gold']) if (!(p[k] >= 0) || !Number.isFinite(p[k])) throw new Error(`bad ${k} in ${p.id}`);
   }
   for (const v of Object.values(s.vassals)) {
     if (v.status === 'active' && v.location == null && !v.marching) throw new Error(`vassal ${v.id} lost`);
-    if (!(v.soldiers >= 0)) throw new Error(`vassal ${v.id} soldiers ${v.soldiers}`);
   }
   if (s.marches.length) throw new Error('marches left after month end');
 }

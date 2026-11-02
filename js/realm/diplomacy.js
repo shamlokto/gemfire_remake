@@ -3,7 +3,7 @@
 // be made at all (nothing spent); success:false when it was made and failed (cost spent).
 // ctx = { province, house, envoy, target, vassal }.
 
-import { MAX_VASSALS_PER_PROVINCE } from '../data/units.js';
+import { MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../data/units.js';
 import { STORY } from '../data/events.js';
 import {
   housePower, ownedProvinces, pairKey, atPeace, addLog, houseName, vassalName, isRuler,
@@ -121,14 +121,23 @@ export function doDiplomacy(state, rng, kind, ctx) {
   return { ok: false, msg: 'Unknown diplomacy.' };
 }
 
-// Moves a vassal (with troops) to another house, into province toPid (or keeps them where they
+// Moves a vassal (with the unit they lead, if it fits) to another house, into province toPid (or keeps them where they
 // stand if toPid is null and their province changes hands elsewhere).
 export function defect(state, vid, newHouse, toPid) {
   const v = state.vassals[vid];
   const old = v.house;
+  const dst = state.provinces[toPid];
   if (v.location != null) {
     const src = state.provinces[v.location];
     src.vassals = src.vassals.filter(x => x !== vid);
+    // The vassal's own unit follows them if there is room; otherwise it stays, leaderless.
+    const u = src.units.find(x => x.leader === vid);
+    if (u) {
+      if (src.id !== toPid && dst.units.length < MAX_UNITS_PER_PROVINCE) {
+        src.units.splice(src.units.indexOf(u), 1);
+        dst.units.push(u);
+      } else if (src.id !== toPid) u.leader = null;
+    }
   }
   v.house = newHouse;
   v.loyalty = 55;

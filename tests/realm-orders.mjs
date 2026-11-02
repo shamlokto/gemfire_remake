@@ -1,22 +1,39 @@
 import assert from 'node:assert/strict';
 import { test, done } from './_harness.mjs';
 import { newGame } from '../js/realm/state.js';
-import { listOrders, applyOrder, DEVELOP_COST } from '../js/realm/orders.js';
+import { listOrders, applyOrder, assignLeader, marchOptions, musterOptions, DEVELOP_COST } from '../js/realm/orders.js';
+
+const uidsOf = (s, pid) => s.provinces[pid].units.map(u => u.uid);
+const ledBy = (s, pid, vid) => s.provinces[pid].units.find(u => u.leader === vid);
 
 test('listOrders for an owned province', () => {
   const s = newGame('aldmere', 1);
   const l = listOrders(s, 8);
   assert.ok(l.find(o => o.type === 'develop' && !o.disabled));
   assert.ok(l.find(o => o.type === 'march' && !o.disabled));
-  assert.deepEqual(listOrders(s, 14), []);
+  assert.ok(l.find(o => o.type === 'muster' && !o.disabled));
+  assert.deepEqual(listOrders(s, 13), []);
 });
 
-test('one order per province per month', () => {
+test('one order per province per month; assign is free', () => {
   const s = newGame('aldmere', 1);
   assert.ok(applyOrder(s, { province: 8, type: 'develop', kind: 'fields' }).ok);
-  const r = applyOrder(s, { province: 8, type: 'develop', kind: 'market' });
-  assert.equal(r.ok, false);
+  assert.equal(applyOrder(s, { province: 8, type: 'develop', kind: 'market' }).ok, false);
   assert.ok(listOrders(s, 8).every(o => o.disabled));
+  const free = s.provinces[8].units.find(u => !u.leader);
+  const r = applyOrder(s, { province: 8, type: 'assign', unit: free.uid, vassal: 'aldmere_4' });
+  assert.ok(r.ok, r.msg);
+  assert.equal(free.leader, 'aldmere_4');
+  assert.equal(s.provinces[8].units.filter(u => u.leader === 'aldmere_4').length, 1, 'left the old unit');
+});
+
+test('assignLeader validation', () => {
+  const s = newGame('aldmere', 1);
+  const u = s.provinces[8].units[0];
+  assert.equal(assignLeader(s, 8, u.uid, 'aldmere_2').ok, false, 'aldmere_2 is in Kingsrest');
+  assert.equal(assignLeader(s, 8, 'nope', 'aldmere_1').ok, false);
+  assert.ok(assignLeader(s, 8, u.uid, null).ok);
+  assert.equal(u.leader, null);
 });
 
 test('develop spends gold and raises the stat', () => {
@@ -26,58 +43,117 @@ test('develop spends gold and raises the stat', () => {
   assert.ok(applyOrder(s, { province: 8, type: 'develop', kind: 'fields' }).ok);
   assert.equal(pr.gold, g - DEVELOP_COST);
   assert.ok(pr.fields > f);
-  pr.gold = 0;
   assert.equal(applyOrder(s, { province: 9, type: 'develop', kind: 'nope' }).ok, false);
 });
 
-test('muster is limited by gold and the unit cap', () => {
+test('muster tops up a unit or raises a new one, within caps', () => {
   const s = newGame('aldmere', 1);
   const pr = s.provinces[8];
-  pr.gold = 1000;
-  const v = s.vassals.aldmere_4;
-  const r = applyOrder(s, { province: 8, type: 'muster', vassal: 'aldmere_4', soldiers: 9999 });
+  pr.gold = 5000;
+  const u = ledBy(s, 8, 'aldmere_4');
+  let r = applyOrder(s, { province: 8, type: 'muster', unit: u.uid, soldiers: 9999 });
   assert.ok(r.ok, r.msg);
-  assert.equal(v.soldiers, 500);
+  assert.equal(u.soldiers, 500);
+  const s2 = newGame('aldmere', 1);
+  s2.provinces[8].gold = 5000;
+  const n0 = s2.provinces[8].units.length;
+  r = applyOrder(s2, { province: 8, type: 'muster', troop: 'archers', soldiers: 120 });
+  assert.ok(r.ok, r.msg);
+  assert.equal(s2.provinces[8].units.length, n0 + 1);
+  const nu = s2.provinces[8].units.find(x => x.uid === r.unit);
+  assert.deepEqual([nu.type, nu.soldiers, nu.leader], ['archers', 120, null]);
+  // Unit cap.
+  const s3 = newGame('aldmere', 1);
+  while (s3.provinces[8].units.length < 8) s3.provinces[8].units.push({ uid: 'x' + s3.provinces[8].units.length, type: 'footmen', soldiers: 500, training: 50, leader: null });
+  s3.provinces[8].gold = 5000;
+  assert.equal(applyOrder(s3, { province: 8, type: 'muster', troop: 'pikes', soldiers: 100 }).ok, false);
+  const mo = musterOptions(s, 8);
+  assert.ok(mo.types.length >= 6 && mo.canRaise === true);
 });
 
-test('cannot order from a province you do not own or use absent vassals', () => {
+test('muster needs no vassal; diplomacy does', () => {
   const s = newGame('aldmere', 1);
-  assert.equal(applyOrder(s, { province: 14, type: 'develop', kind: 'fields' }).ok, false);
-  assert.equal(applyOrder(s, { province: 8, type: 'muster', vassal: 'vey_0', soldiers: 10 }).ok, false);
+  const pr = s.provinces[9];
+  for (const v of [...pr.vassals]) { s.vassals[v].location = 8; s.provinces[8].vassals.push(v); }
+  pr.vassals = [];
+  for (const u of pr.units) u.leader = null;
+  pr.gold = 500;
+  assert.ok(applyOrder(s, { province: 9, type: 'muster', troop: 'footmen', soldiers: 50 }).ok);
+  s.provinces[9].ordered = false;
+  assert.equal(applyOrder(s, { province: 9, type: 'diplomacy', kind: 'truce', target: 'vey' }).ok, false);
 });
 
-test('march to own province transfers; to foreign queues', () => {
+test('cannot order from a province you do not own or with units from elsewhere', () => {
   const s = newGame('aldmere', 1);
-  let r = applyOrder(s, { province: 8, type: 'march', to: 9, vassals: ['aldmere_4'], food: 10 });
-  assert.ok(r.ok, r.msg);
-  assert.equal(s.vassals.aldmere_4.location, 9);
-  r = applyOrder(s, { province: 9, type: 'march', to: 14, vassals: ['aldmere_2'], food: 0 });
-  assert.equal(r.ok, false, 'not adjacent? 9-14 not adjacent');
-  r = applyOrder(s, { province: 9, type: 'march', to: 15, vassals: ['aldmere_2', 'aldmere_3'], food: 20 });
-  assert.ok(r.ok, r.msg);
-  assert.equal(s.marches.length, 1);
-  assert.equal(s.vassals.aldmere_2.location, null);
-  assert.ok(s.vassals.aldmere_2.marching);
+  assert.equal(applyOrder(s, { province: 13, type: 'develop', kind: 'fields' }).ok, false);
+  assert.equal(applyOrder(s, { province: 8, type: 'march', to: 9, units: [uidsOf(s, 9)[0]] }).ok, false);
 });
 
-test('no attacks on truce partners; at most five marchers', () => {
+test('transfer moves units with their leaders; leaderless units move alone', () => {
+  const s = newGame('aldmere', 1);
+  const u = ledBy(s, 8, 'aldmere_4');
+  const free = s.provinces[8].units.find(x => !x.leader);
+  let r = applyOrder(s, { province: 8, type: 'march', to: 9, units: [u.uid, free.uid], food: 10 });
+  assert.ok(r.ok, r.msg);
+  assert.equal(s.vassals.aldmere_4.location, 9, 'leader goes with the unit');
+  assert.ok(uidsOf(s, 9).includes(u.uid) && uidsOf(s, 9).includes(free.uid));
+  assert.equal(free.leader, null);
+});
+
+test('attack queues a march: needs a vassal, max 4 units, 5th slot', () => {
+  const s = newGame('aldmere', 1);
+  const pr = s.provinces[8];
+  pr.gold = 5000;
+  for (let i = 0; i < 2; i++) applyOrder(s, { province: 8, type: 'muster', troop: 'footmen', soldiers: 100 }), pr.ordered = false;
+  const all = uidsOf(s, 8);
+  assert.ok(all.length >= 5);
+  assert.equal(applyOrder(s, { province: 8, type: 'march', to: 13, units: all.slice(0, 5) }).ok, false, 'too many units');
+  const unled = pr.units.filter(u => !u.leader).map(u => u.uid).slice(0, 2);
+  assert.equal(applyOrder(s, { province: 8, type: 'march', to: 13, units: unled }).ok, false, 'no commander');
+  const mo = marchOptions(s, 8);
+  assert.ok(mo.targets.attack.includes(13) && mo.targets.transfer.includes(9));
+  assert.ok(mo.fifth.some(f => f.kind === 'spirit' && f.id === 'tide'));
+  const own = ledBy(s, 8, 'aldmere_1');
+  const r = applyOrder(s, { province: 8, type: 'march', to: 13, units: unled, vassals: ['aldmere_1'], fifth: 'spirit', food: 20 });
+  assert.ok(r.ok, r.msg);
+  const m = s.marches[0];
+  assert.equal(m.units.length, 2, 'only the chosen units march');
+  assert.equal(own.leader, null, "aldmere_1's old unit stays behind, leaderless");
+  assert.deepEqual(m.fifth, { kind: 'spirit', id: 'tide' });
+  assert.equal(s.vassals.aldmere_1.location, null);
+  assert.ok(s.vassals.aldmere_1.marching);
+  assert.ok(!uidsOf(s, 8).some(id => m.units.some(u => u.uid === id)));
+  // The same spirit cannot be summoned twice.
+  assert.ok(!marchOptions(s, 9).fifth.some(f => f.kind === 'spirit'));
+});
+
+test('no attacks on truce partners', () => {
   const s = newGame('aldmere', 1);
   s.truces['aldmere|corvane'] = 99;
-  assert.equal(applyOrder(s, { province: 8, type: 'march', to: 2, vassals: ['aldmere_1'] }).ok, false);
-  assert.equal(applyOrder(s, { province: 8, type: 'march', to: 14, vassals: ['a', 'b', 'c', 'd', 'e', 'f'] }).ok, false);
+  s.provinces[3].owner = 'corvane';
+  const u = ledBy(s, 8, 'aldmere_1');
+  // Aldford (8) is not next to Greywatch (3); use Thornwood route via ownership shuffle.
+  s.provinces[7].owner = 'aldmere';
+  s.vassals.aldmere_1.location = 7; s.provinces[8].vassals = s.provinces[8].vassals.filter(x => x !== 'aldmere_1'); s.provinces[7].vassals.push('aldmere_1');
+  s.provinces[8].units = s.provinces[8].units.filter(x => x !== u); s.provinces[7].units.push(u);
+  assert.equal(applyOrder(s, { province: 7, type: 'march', to: 3, units: [u.uid] }).ok, false);
 });
 
-test('hire, govern, supply, spy', () => {
+test('hire, govern, supply, spy, disband', () => {
   const s = newGame('isolde', 1);
-  assert.ok(applyOrder(s, { province: 11, type: 'hire', company: 'bandits' }).ok);
-  assert.equal(s.provinces[11].company.type, 'bandits');
-  assert.ok(applyOrder(s, { province: 17, type: 'govern', kind: 'feast' }).ok);
+  assert.ok(applyOrder(s, { province: 21, type: 'hire', company: 'bandits' }).ok);
+  assert.equal(s.provinces[21].company.type, 'bandits');
+  assert.ok(applyOrder(s, { province: 22, type: 'govern', kind: 'feast' }).ok);
   const s2 = newGame('isolde', 1);
-  assert.ok(applyOrder(s2, { province: 11, type: 'supply', to: 17, food: 50, gold: 10 }).ok);
+  assert.ok(applyOrder(s2, { province: 21, type: 'supply', to: 22, food: 50, gold: 10 }).ok);
   const s3 = newGame('isolde', 1);
-  const r = applyOrder(s3, { province: 11, type: 'spy', target: 1 });
-  assert.ok(r.ok && r.report.province === 1);
-  assert.equal(s3.intel.isolde[1], 0);
+  const r = applyOrder(s3, { province: 21, type: 'spy', target: 10 });
+  assert.ok(r.ok && r.report.province === 10 && Array.isArray(r.report.units));
+  assert.equal(s3.intel.isolde[10], 0);
+  const s4 = newGame('isolde', 1);
+  const n = s4.provinces[21].units.length;
+  assert.ok(applyOrder(s4, { province: 21, type: 'disband', unit: s4.provinces[21].units.at(-1).uid }).ok);
+  assert.equal(s4.provinces[21].units.length, n - 1);
 });
 
 test('diplomacy runs and is deterministic', () => {
@@ -94,8 +170,7 @@ test('diplomacy runs and is deterministic', () => {
 test('bribe cannot target rulers', () => {
   const s = newGame('aldmere', 1);
   s.provinces[8].gold = 5000;
-  const r = applyOrder(s, { province: 8, type: 'diplomacy', kind: 'bribe', vassal: 'vey_0' });
-  assert.equal(r.ok, false);
+  assert.equal(applyOrder(s, { province: 8, type: 'diplomacy', kind: 'bribe', vassal: 'vey_0' }).ok, false);
 });
 
 await done('realm-orders');

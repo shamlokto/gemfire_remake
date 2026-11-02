@@ -1,13 +1,15 @@
 // Canvas world map: background per season, roads, province markers, armies, shards, marches,
 // fog of war. Pan with drag, zoom with wheel or pinch. Map space is 1000 x 750 (world.js).
-import { PROVINCES, ADJACENCY, MAP_W, MAP_H, seasonOf } from '../data/world.js';
+import { PROVINCES, MAP_W, MAP_H, seasonOf } from '../data/world.js';
 import { HOUSE_BY_ID } from '../data/houses.js';
 import { SPIRITS } from '../data/spirits.js';
-import { art, SEASON_MAP, CREST } from '../data/art.js';
+import { art, hasArt, SEASON_MAP, CREST } from '../data/art.js';
+import { landShapes, LAND_EDGES, SEA_LANES, LAND_PALETTE, RADIUS } from './landshape.js';
 import { canSee } from '../realm/state.js';
 
 const imgCache = new Map();
 function img(slot) {
+  if (!hasArt(slot)) return null;          // placeholders are not drawn: the map paints itself
   const src = art(slot);
   let im = imgCache.get(src);
   if (!im) { im = new Image(); im.decoding = 'async'; im.src = src; imgCache.set(src, im); }
@@ -159,9 +161,14 @@ export class MapView {
     const st = this.state, pr = st.provinces[pid], P = PROVINCES[pid];
     const seen = canSee(st, st.player, pid);
     const owner = pr.owner ? HOUSE_BY_ID[pr.owner].name : 'Free hold';
-    const n = pr.vassals.length;
-    this.tip.innerHTML = `<b>${P.name}</b> · ${owner}<br><span style="color:var(--muted)">${P.terrain}` +
-      (seen ? (n ? ` · ${n} vassal${n > 1 ? 's' : ''}` : pr.owner ? ' · ungarrisoned' : ` · militia ${pr.militia}`) : ' · unseen') +
+    const units = pr.units || [], nv = pr.vassals.length;
+    const sol = units.reduce((a, u) => a + (u.soldiers || 0), 0);
+    const garrison = units.length
+      ? ` · ${units.length} unit${units.length > 1 ? 's' : ''} (${sol})${nv ? `, ${nv} vassal${nv > 1 ? 's' : ''}` : ''}`
+      : nv ? ` · ${nv} vassal${nv > 1 ? 's' : ''}` : pr.owner ? ' · ungarrisoned' : ` · militia ${Array.isArray(pr.militia) ? pr.militia.reduce((a, n) => a + n, 0) : (pr.militia ?? '')}`;
+    const exits = (PROVINCES[pid] && NEIGH[pid].length === 1) ? ' · dead end' : '';
+    this.tip.innerHTML = `<b>${P.name}</b> · ${owner}<br><span style="color:var(--muted)">${P.terrain}${exits}` +
+      (seen ? garrison : ' · unseen') +
       (pr.shard && seen ? ` · ${SPIRITS[pr.shard].name} shard` : '') + '</span>';
     this.tip.hidden = false;
     const tw = this.tip.offsetWidth;
@@ -182,13 +189,16 @@ export class MapView {
     ctx.translate(v.x, v.y);
     ctx.scale(v.s, v.s);
 
-    // Background
+    // Background: painted map art if installed, else procedural islands
     const season = seasonOf(st.month);
     const bg = img(SEASON_MAP[season]) || img(10);
-    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 30;
-    if (bg) ctx.drawImage(bg, 0, 0, MAP_W, MAP_H);
-    else { ctx.fillStyle = '#3a5a70'; ctx.fillRect(0, 0, MAP_W, MAP_H); }
-    ctx.shadowBlur = 0;
+    if (bg) {
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 30;
+      ctx.drawImage(bg, 0, 0, MAP_W, MAP_H);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.drawImage(landCanvas(season), 0, 0, MAP_W, MAP_H);
+    }
     // Frame
     ctx.strokeStyle = 'rgba(216,176,90,0.6)'; ctx.lineWidth = 3 / v.s + 1;
     ctx.strokeRect(0, 0, MAP_W, MAP_H);
@@ -196,26 +206,32 @@ export class MapView {
     const player = st.player;
     const seen = PROVINCES.map(p => canSee(st, player, p.id));
 
-    // Territory wash: soft owner-coloured glow under each province
+    // Territory wash: soft owner-coloured glow under each province (clipped to its disc size)
     for (const p of PROVINCES) {
       const pr = st.provinces[p.id];
       if (!pr.owner || !seen[p.id]) continue;
-      const col = HOUSE_BY_ID[pr.owner].color;
-      const g = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, 78);
-      g.addColorStop(0, hexA(col, 0.38)); g.addColorStop(1, hexA(col, 0));
+      const col = HOUSE_BY_ID[pr.owner].color, R = RADIUS[p.id] + 6;
+      const g = ctx.createRadialGradient(p.x, p.y, 8, p.x, p.y, R);
+      g.addColorStop(0, hexA(col, 0.42)); g.addColorStop(1, hexA(col, 0));
       ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 78, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Roads
+    // Sea lanes and the causeway: the only ways onto the islands
+    for (const [a, b] of SEA_LANES) {
+      const A = PROVINCES[a], B = PROVINCES[b];
+      if (A.name === 'Westreach' || B.name === 'Westreach') causeway(ctx, A, B);
+      else seaLane(ctx, A, B, (this.t || 0) / 60);
+    }
+
+    // Roads (land borders)
     ctx.lineCap = 'round';
-    for (const p of PROVINCES) for (const n of ADJACENCY[p.id]) {
-      if (n < p.id) continue;
-      const q = PROVINCES[n];
+    for (const [a, b] of LAND_EDGES) {
+      const p = PROVINCES[a], q = PROVINCES[b];
       ctx.strokeStyle = 'rgba(40,24,10,0.55)'; ctx.lineWidth = 5;
       ctx.setLineDash([]);
       line(ctx, p, q);
-      ctx.strokeStyle = 'rgba(240,220,170,0.75)'; ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(240,220,170,0.8)'; ctx.lineWidth = 2;
       ctx.setLineDash([7, 6]);
       line(ctx, p, q);
     }
@@ -226,7 +242,7 @@ export class MapView {
     for (const p of PROVINCES) {
       if (seen[p.id]) continue;
       ctx.save();
-      ctx.beginPath(); ctx.arc(p.x, p.y, 74, 0, Math.PI * 2); ctx.clip();
+      ctx.beginPath(); ctx.arc(p.x, p.y, RADIUS[p.id] + 6, 0, Math.PI * 2); ctx.clip();
       if (fog) { ctx.globalAlpha = 0.85; ctx.drawImage(fog, p.x - 110 + (p.id * 37) % 60, p.y - 110, 220, 220); }
       else { ctx.fillStyle = 'rgba(40,44,56,0.8)'; ctx.fill(); }
       ctx.restore();
@@ -271,8 +287,8 @@ export class MapView {
         ctx.fillStyle = '#f3d58a'; ctx.font = 'bold 14px Georgia'; ctx.textAlign = 'center';
         ctx.fillText('♛', p.x, p.y - r - 3);
       }
-      // army
-      const nv = pr.vassals.length;
+      // army: number of troop units garrisoned
+      const nv = (pr.units || []).length;
       if (nv && seen[p.id]) {
         const ax = p.x + r * 1.05, ay = p.y - r * 0.6;
         if (army) ctx.drawImage(army, ax - 13, ay - 15, 26, 26);
@@ -304,6 +320,131 @@ export class MapView {
   }
 
   destroy() { this.ro.disconnect(); this.active = false; }
+}
+
+const NEIGH = PROVINCES.map(p => LAND_EDGES.concat(SEA_LANES).filter(e => e.includes(p.id)).map(e => e[0] === p.id ? e[1] : e[0]));
+
+// ---------------------------------------------------------------- procedural land
+const landCache = new Map();
+function landCanvas(season) {
+  if (landCache.has(season)) return landCache.get(season);
+  const K = 2, c = document.createElement('canvas');
+  c.width = MAP_W * K; c.height = MAP_H * K;
+  const g = c.getContext('2d');
+  g.scale(K, K);
+  paintLand(g, season);
+  landCache.set(season, c);
+  return c;
+}
+
+export function paintLand(g, season) {
+  const pal = LAND_PALETTE[season] || LAND_PALETTE[1];
+  // sea
+  const sea = g.createLinearGradient(0, 0, MAP_W, MAP_H);
+  sea.addColorStop(0, pal.sea[0]); sea.addColorStop(1, pal.sea[1]);
+  g.fillStyle = sea; g.fillRect(0, 0, MAP_W, MAP_H);
+  let r = seeded(7);
+  g.strokeStyle = 'rgba(255,255,255,0.10)'; g.lineWidth = 1.2;
+  for (let i = 0; i < 260; i++) {
+    const x = r() * MAP_W, y = r() * MAP_H, w = 8 + r() * 14;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + w / 2, y - 3, x + w, y); g.stroke();
+  }
+  const { circles, polys } = landShapes();
+  const paint = (grow, color) => {
+    g.fillStyle = color; g.strokeStyle = color; g.lineJoin = 'round'; g.lineWidth = grow * 2;
+    for (const c of circles) { g.beginPath(); g.arc(c.x, c.y, c.r + grow, 0, Math.PI * 2); g.fill(); }
+    for (const p of polys) {
+      g.beginPath(); p.pts.forEach((q, i) => (i ? g.lineTo(q.x, q.y) : g.moveTo(q.x, q.y))); g.closePath();
+      g.fill(); if (grow > 0) g.stroke();
+    }
+  };
+  // shallows, coastline, beach, land
+  paint(16, 'rgba(160,210,220,0.18)');
+  paint(9, 'rgba(160,210,220,0.22)');
+  paint(5, pal.coast);
+  paint(3, pal.beach);
+  paint(0, pal.land);
+  // terrain colour and marks per province
+  const TC = { plains: null, forest: '#4d6b36', hills: '#9a7c4c', mountain: '#7c7468', marsh: '#5e7d62', coast: null };
+  for (const p of PROVINCES) {
+    const R = RADIUS[p.id];
+    const tc = season === 3 ? (p.terrain === 'forest' ? '#6f8a6c' : null) : TC[p.terrain];
+    if (tc) {
+      const gr = g.createRadialGradient(p.x, p.y, 4, p.x, p.y, R * 0.95);
+      gr.addColorStop(0, hexA(tc, 0.55)); gr.addColorStop(1, hexA(tc, 0));
+      g.fillStyle = gr; g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill();
+    }
+    r = seeded(500 + p.id);
+    const spot = () => { const a = r() * Math.PI * 2, d = R * (0.35 + r() * 0.5); return [p.x + Math.cos(a) * d, p.y + Math.sin(a) * d]; };
+    if (p.terrain === 'mountain' || p.terrain === 'hills') {
+      const n = p.terrain === 'mountain' ? 7 : 4;
+      for (let i = 0; i < n; i++) {
+        const [x, y] = spot(), s = p.terrain === 'mountain' ? 10 + r() * 6 : 7 + r() * 4;
+        g.fillStyle = season === 3 ? '#9aa6b0' : '#5e5446';
+        g.beginPath(); g.moveTo(x - s, y + s * 0.6); g.lineTo(x, y - s); g.lineTo(x + s, y + s * 0.6); g.closePath(); g.fill();
+        g.fillStyle = '#f4f6f8';
+        g.beginPath(); g.moveTo(x - s * 0.35, y - s * 0.3); g.lineTo(x, y - s); g.lineTo(x + s * 0.35, y - s * 0.3); g.closePath(); g.fill();
+      }
+    } else if (p.terrain === 'forest') {
+      for (let i = 0; i < 12; i++) {
+        const [x, y] = spot();
+        g.fillStyle = season === 2 ? ['#a8502a', '#c07a2a', '#7a4a20'][i % 3] : season === 3 ? '#4a6a52' : '#2f4a24';
+        g.beginPath(); g.arc(x, y, 5 + r() * 3, 0, Math.PI * 2); g.fill();
+      }
+    } else if (p.terrain === 'marsh') {
+      g.strokeStyle = 'rgba(40,70,50,0.7)'; g.lineWidth = 1.4;
+      for (let i = 0; i < 14; i++) { const [x, y] = spot(); g.beginPath(); g.moveTo(x, y); g.lineTo(x - 2, y - 8); g.moveTo(x, y); g.lineTo(x + 3, y - 7); g.stroke(); }
+      g.fillStyle = 'rgba(60,110,120,0.45)';
+      for (let i = 0; i < 4; i++) { const [x, y] = spot(); g.beginPath(); g.ellipse(x, y, 9, 4, 0, 0, Math.PI * 2); g.fill(); }
+    } else if (p.terrain === 'plains') {
+      g.strokeStyle = season === 3 ? 'rgba(150,160,170,0.4)' : 'rgba(120,100,40,0.35)'; g.lineWidth = 1;
+      for (let i = 0; i < 6; i++) { const [x, y] = spot(); for (let k = 0; k < 3; k++) { g.beginPath(); g.moveTo(x - 7, y + k * 3); g.lineTo(x + 7, y + k * 3); g.stroke(); } }
+    }
+  }
+  // paper grain and vignette
+  r = seeded(99);
+  g.fillStyle = 'rgba(60,40,20,0.05)';
+  for (let i = 0; i < 1600; i++) g.fillRect(r() * MAP_W, r() * MAP_H, 1.5, 1.5);
+  const vg = g.createRadialGradient(MAP_W / 2, MAP_H / 2, MAP_H * 0.45, MAP_W / 2, MAP_H / 2, MAP_W * 0.7);
+  vg.addColorStop(0, 'rgba(20,10,0,0)'); vg.addColorStop(1, 'rgba(20,10,0,0.45)');
+  g.fillStyle = vg; g.fillRect(0, 0, MAP_W, MAP_H);
+}
+
+function seeded(seed) {
+  let s = seed >>> 0;
+  return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+function seaLane(ctx, a, b, phase) {
+  const mx = (a.x + b.x) / 2 + (a.y - b.y) * 0.18, my = (a.y + b.y) / 2 + (b.x - a.x) * 0.18;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(10,30,50,0.5)'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
+  ctx.strokeStyle = 'rgba(230,245,255,0.95)'; ctx.lineWidth = 2.4; ctx.setLineDash([2, 7]); ctx.lineDashOffset = -phase;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
+  ctx.setLineDash([]);
+  // little ship at the midpoint of the curve
+  const sx = (a.x + 2 * mx + b.x) / 4, sy = (a.y + 2 * my + b.y) / 4;
+  ctx.translate(sx, sy);
+  ctx.fillStyle = '#5a3a1e'; ctx.strokeStyle = '#f3e3b5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(-9, 2); ctx.lineTo(9, 2); ctx.lineTo(6, 7); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f6efd8';
+  ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(0, 1); ctx.lineTo(8, 0); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-1, -9); ctx.lineTo(-1, 1); ctx.lineTo(-7, 0); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function causeway(ctx, a, b) {
+  const ang = Math.atan2(b.y - a.y, b.x - a.x), len = Math.hypot(b.x - a.x, b.y - a.y);
+  ctx.save();
+  ctx.translate(a.x, a.y); ctx.rotate(ang);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, -6, len, 14);
+  ctx.fillStyle = '#9a9184'; ctx.fillRect(0, -7, len, 12);
+  ctx.fillStyle = '#7a7266';
+  for (let x = 4; x < len; x += 12) ctx.fillRect(x, -7, 2, 12);
+  ctx.strokeStyle = '#d8cfbf'; ctx.lineWidth = 1; ctx.strokeRect(0, -7, len, 12);
+  ctx.restore();
 }
 
 function line(ctx, a, b) {

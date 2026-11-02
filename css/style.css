@@ -317,3 +317,15 @@ h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: 0.04em;
   .title-bg, .end-screen .bgimg { animation: none; }
   .screen, .side { transition: none; }
 }
+
+/* ---------- v2 army model: units apart from vassals ---------- */
+.vassal.unit-row { grid-template-columns: 52px 1fr auto; }
+.unit-row .count { margin-left: 8px; font-family: var(--font-display, Georgia); font-size: 13px; color: var(--accent); }
+.unit-row .slot5 { margin-left: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--bg); background: var(--accent); border-radius: 3px; padding: 1px 5px; vertical-align: 2px; }
+.unit-row .mini { align-items: center; }
+.unit-row .bar.strength { flex: 1 1 60px; min-width: 50px; height: 5px; }
+.unit-row .bar.strength > i { background: linear-gradient(90deg, #8a3a2a, #d9a94a); }
+.no-leader { width: 48px; height: 48px; border-radius: 6px; border: 1px dashed var(--line); display: grid; place-items: center; background: rgba(0,0,0,0.25); }
+.no-leader img { width: 40px; height: 40px; object-fit: contain; opacity: .85; }
+p.warn { color: #f0a070; background: rgba(160,60,30,0.15); border: 1px solid rgba(240,160,112,0.35); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.pick > span:first-child { color: var(--good, #7fbf6a); text-align: center; }

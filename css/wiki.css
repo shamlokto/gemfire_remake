@@ -157,3 +157,5 @@ details.group .body { padding: 0 14px 14px; }
 .place span { font-family: var(--w-display); font-size: 13px; letter-spacing: .03em; }
 .place i { font-family: var(--w-body); color: var(--w-muted); }
 @media (max-width: 760px) { .places { grid-template-columns: repeat(2, minmax(0, 1fr)); } .crest { width: 48px; height: 48px; } }
+.mapbox text.ship { font-size: 18px; stroke-width: 0; fill: #f6efd8; }
+.xtable i.dim { color: var(--w-muted); }

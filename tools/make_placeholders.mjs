@@ -4,8 +4,9 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as ART from '../js/data/art.js';
-const { SLOTS, pad3, HOUSE_ORDER, ORDER_BACKDROP, EXTRA_EVENT } = ART;
-import { PROVINCES, ADJACENCY } from '../js/data/world.js';
+const { SLOTS, pad3, HOUSE_ORDER, ORDER_BACKDROP, EXTRA_EVENT, PROVINCE_VIGNETTE } = ART;
+import { PROVINCES } from '../js/data/world.js';
+import { landShapes, LAND_PALETTE, LAND_EDGES, SEA_LANES } from '../js/ui/landshape.js';
 import { HOUSES } from '../js/data/houses.js';
 import { SPIRITS } from '../js/data/spirits.js';
 
@@ -34,7 +35,8 @@ HOUSE_ORDER.forEach((h, i) => {
 });
 Object.assign(LABELS, { 107: 'Plains battle', 108: 'Forest battle', 109: 'Mountain battle', 110: 'Marsh battle',
   111: 'World map (spring)', 112: 'World map (autumn)' });
-PROVINCES.forEach(p => { LABELS[113 + p.id] = p.name; });
+const VIGNETTE_PROVINCE = {};
+PROVINCES.forEach(p => { LABELS[PROVINCE_VIGNETTE(p.id)] = p.name; VIGNETTE_PROVINCE[PROVINCE_VIGNETTE(p.id)] = p; });
 for (const [k, v] of Object.entries(ORDER_BACKDROP)) LABELS[v] = `Order: ${k}`;
 for (const [k, v] of Object.entries(EXTRA_EVENT)) LABELS[v] = `Event: ${k}`;
 for (const [name, pre] of [['CLASH_CUTIN', 'Clash'], ['SPIRIT_CUTIN', 'Summon'], ['BATTLE_MOMENT', 'Battle'], ['WEATHER_FX', 'Weather'], ['BATTLE_FRAME', 'Frame'], ['BATTLE_EMBLEM', 'Emblem']]) {
@@ -149,25 +151,43 @@ function mulberry(seed) {
   return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-function worldMap(s, w, h, winter) {
-  const k = w / 1000;
-  const land = winter ? ['#e8eef2', '#c8d4dc'] : ['#e6d3a3', '#cdb47e'];
-  const rnd = mulberry(10);
-  let blobs = '';
+function worldMap(s, w, h, season) {
+  const k = w / 1000, pal = LAND_PALETTE[season];
+  const { circles, polys } = landShapes();
+  const layer = (grow, color) => circles.map(c => `<circle cx="${(c.x * k).toFixed(1)}" cy="${(c.y * k).toFixed(1)}" r="${((c.r + grow) * k).toFixed(1)}"/>`).join('') +
+    polys.map(p => `<polygon points="${p.pts.map(q => `${(q.x * k).toFixed(1)},${(q.y * k).toFixed(1)}`).join(' ')}" stroke-width="${grow * 2 * k}" stroke-linejoin="round"/>`).join('');
+  const g = (grow, color) => `<g fill="${color}" stroke="${color}">${layer(grow, color)}</g>`;
+  const rnd = mulberry(10 + season);
+  let marks = '';
   for (const p of PROVINCES) {
-    const col = winter ? '#dfe8ee' : ({ plains: '#cfc07a', forest: '#7f9a5a', hills: '#b8a070', mountain: '#9a8f80', marsh: '#7a9a7a', coast: '#d8c48a' })[p.terrain];
-    blobs += `<ellipse cx="${p.x * k}" cy="${p.y * k}" rx="${(70 + rnd() * 20) * k}" ry="${(60 + rnd() * 15) * k}" fill="${col}" fill-opacity="0.55"/>`;
-    if (p.terrain === 'mountain') for (let i = 0; i < 4; i++) { const x = (p.x - 40 + rnd() * 80) * k, y = (p.y - 30 + rnd() * 50) * k; blobs += `<path d="M${x - 16 * k} ${y + 10 * k} L${x} ${y - 16 * k} L${x + 16 * k} ${y + 10 * k} Z" fill="#6a6258" fill-opacity="0.7"/>`; }
-    if (p.terrain === 'forest') for (let i = 0; i < 7; i++) { const x = (p.x - 45 + rnd() * 90) * k, y = (p.y - 35 + rnd() * 60) * k; blobs += `<circle cx="${x}" cy="${y}" r="${7 * k}" fill="#3e5a2e" fill-opacity="0.7"/>`; }
+    const tc = { forest: '#4d6b36', hills: '#9a7c4c', mountain: '#7c7468', marsh: '#5e7d62' }[p.terrain];
+    if (tc && season !== 3) marks += `<circle cx="${p.x * k}" cy="${p.y * k}" r="${50 * k}" fill="${tc}" fill-opacity="0.45" filter="url(#soft)"/>`;
+    if (p.terrain === 'mountain' || p.terrain === 'hills') for (let i = 0; i < (p.terrain === 'mountain' ? 6 : 3); i++) {
+      const x = (p.x - 35 + rnd() * 70) * k, y = (p.y - 30 + rnd() * 55) * k, z = (p.terrain === 'mountain' ? 13 : 9) * k;
+      marks += `<path d="M${x - z} ${y + z * 0.6} L${x} ${y - z} L${x + z} ${y + z * 0.6} Z" fill="${season === 3 ? '#9aa6b0' : '#5e5446'}"/><path d="M${x - z * 0.35} ${y - z * 0.3} L${x} ${y - z} L${x + z * 0.35} ${y - z * 0.3} Z" fill="#f4f6f8"/>`;
+    }
+    if (p.terrain === 'forest') for (let i = 0; i < 10; i++) {
+      const x = (p.x - 40 + rnd() * 80) * k, y = (p.y - 35 + rnd() * 65) * k;
+      marks += `<circle cx="${x}" cy="${y}" r="${6 * k}" fill="${season === 2 ? '#a8502a' : season === 3 ? '#4a6a52' : '#2f4a24'}"/>`;
+    }
+    if (p.terrain === 'marsh') for (let i = 0; i < 5; i++) {
+      const x = (p.x - 40 + rnd() * 80) * k, y = (p.y - 30 + rnd() * 55) * k;
+      marks += `<ellipse cx="${x}" cy="${y}" rx="${10 * k}" ry="${4 * k}" fill="#3c6e78" fill-opacity="0.5"/>`;
+    }
   }
-  const river = `<path d="M${420 * k} ${0} C ${470 * k} ${180 * k}, ${380 * k} ${300 * k}, ${470 * k} ${380 * k} S ${520 * k} ${600 * k}, ${480 * k} ${750 * k}" stroke="${winter ? '#a8c4d8' : '#5a8ab0'}" stroke-width="${10 * k}" fill="none" stroke-opacity="0.8"/>`;
-  return svg(w, h, `<defs>${grad('sea', '#3a6a8a', '#244a66', false)}${grad('land', land[0], land[1])}
-<filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="3" seed="4"/><feDisplacementMap in="SourceGraphic" scale="${40 * k}"/></filter>
+  const lanes = SEA_LANES.map(([a, b]) => {
+    const A = PROVINCES[a], B = PROVINCES[b];
+    const mx = (A.x + B.x) / 2 + (A.y - B.y) * 0.18, my = (A.y + B.y) / 2 + (B.x - A.x) * 0.18;
+    return `<path d="M${A.x * k} ${A.y * k} Q${mx * k} ${my * k} ${B.x * k} ${B.y * k}" stroke="#e6f5ff" stroke-width="${2.5 * k}" stroke-dasharray="${3 * k} ${8 * k}" fill="none" stroke-opacity="0.8"/>`;
+  }).join('');
+  return svg(w, h, `<defs>${grad('sea', pal.sea[0], pal.sea[1], false)}
+<filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" seed="4"/><feDisplacementMap in="SourceGraphic" scale="${14 * k}"/></filter>
+<filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="${14 * k}"/></filter>
 <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2"/><feColorMatrix values="0 0 0 0 0.4 0 0 0 0 0.3 0 0 0 0 0.2 0 0 0 0.12 0"/></filter>
 <radialGradient id="v" cx="0.5" cy="0.5" r="0.75"><stop offset="0.6" stop-color="#2a1a08" stop-opacity="0"/><stop offset="1" stop-color="#2a1a08" stop-opacity="0.55"/></radialGradient></defs>
 <rect width="${w}" height="${h}" fill="url(#sea)"/>
-<path filter="url(#rough)" d="M${30 * k} ${30 * k} H${860 * k} Q${830 * k} ${200 * k} ${850 * k} ${380 * k} T ${840 * k} ${720 * k} H${30 * k} Z" fill="url(#land)"/>
-<g filter="url(#rough)">${blobs}</g>${river}
+<g filter="url(#rough)">${g(16, 'rgba(160,210,220,0.18)')}${g(5, pal.coast)}${g(3, pal.beach)}${g(0, pal.land)}</g>
+${marks}${lanes}
 <rect width="${w}" height="${h}" filter="url(#paper)"/><rect width="${w}" height="${h}" fill="url(#v)"/>${stamp(s, w, h)}`);
 }
 
@@ -198,7 +218,7 @@ function make(s) {
   if (kind === 'portrait') return portrait(s, w, h);
   if (kind === 'sprite') return sprite(s, w, h);
   if (kind === 'terrain') return terrain(s, w, h);
-  if (kind === 'map') return worldMap(s, w, h, slot === 11);
+  if (kind === 'map') return worldMap(s, w, h, { 10: 1, 11: 3, 111: 0, 112: 2 }[slot] ?? 1);
   if (kind === 'crest') return crest(s, w, h);
   if (kind === 'vignette') return vignette(s, w, h);
   if (kind === 'backdrop') return backdrop(s, w, h);
@@ -237,7 +257,7 @@ function crest(s, w, h) {
 }
 
 function vignette(s, w, h) {
-  const p = PROVINCES[s.slot - 113];
+  const p = VIGNETTE_PROVINCE[s.slot] || PROVINCES[0];
   const col = { plains: ['#e8d088', '#7a8a3a'], forest: ['#9ab88a', '#1e3a20'], hills: ['#d8c090', '#6a5a30'],
     mountain: ['#c8d0e0', '#4a4a50'], marsh: ['#a8b8a0', '#2a3a2a'], coast: ['#a8d0e8', '#2a5a7a'] }[p.terrain];
   return scene(s, w, h, col[0], col[1], castle(w * (0.3 + (p.id % 5) * 0.1), h * 0.7, h / 500));

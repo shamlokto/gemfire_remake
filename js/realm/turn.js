@@ -7,17 +7,24 @@
 // ctx = { march, seed }. All other battles use autoResolve(input, seed) from ../battle/auto.js,
 // loaded lazily (opts.autoResolve overrides it, e.g. in tests). Mutates state; returns a summary
 // { battles: [{ march, input, result }], winner, defeated }.
+//
+// v2: a battle side is up to 4 troop units plus a 5th slot (company or summoned spirit); see
+// buildBattleInput. Defenders beyond the 4 fielded units fall back with the vassals if the
+// province falls.
 
 import { STORY } from '../data/events.js';
 import { HOUSES } from '../data/houses.js';
-import { SPIRIT_IDS } from '../data/spirits.js';
+import { SPIRIT_IDS, SPIRIT_UNIT } from '../data/spirits.js';
 import { ADJACENCY, PROVINCES } from '../data/world.js';
-import { MAX_VASSALS_PER_PROVINCE } from '../data/units.js';
+import { MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../data/units.js';
 import {
-  withRng, seasonIndex, provinceVassals, ownedProvinces, houseVassals, shardsOf, addLog,
+  withRng, seasonIndex, season, provinceVassals, ownedProvinces, houseVassals, shardsOf, addLog,
   houseName, provinceName, vassalName, emptyMilitia, isPlayerControlled, aliveHouses,
-  VICTORY_PROVINCES,
+  VICTORY_PROVINCES, fieldedUnits, availableSpirit,
 } from './state.js';
+
+// A vassal on the losing side with no surviving unit is captured with this chance.
+export const UNITLESS_CAPTURE = 0.4;
 import { applyOrder, resetOrders, moveVassal } from './orders.js';
 import { monthlyTick } from './economy.js';
 import { planHouseOrders } from './ai.js';
@@ -30,48 +37,60 @@ async function defaultAuto() {
 }
 
 // ---------- battle input ----------
-function availableSpirit(state, house) {
-  if (!house) return null;
-  const si = seasonIndex(state);
-  const used = state.houses[house].spiritUsed;
-  return shardsOf(state, house).find(s => used[s] !== si) || null;
-}
-
-const vassalUnit = v => ({
-  id: v.id, kind: 'vassal', vassalId: v.id, type: v.troop, soldiers: v.soldiers,
-  training: v.training, might: v.might, wits: v.wits,
+const troopIn = (state, u) => {
+  const l = u.leader ? state.vassals[u.leader] : null;
+  return { id: u.uid, kind: 'troop', type: u.type, soldiers: u.soldiers, training: u.training,
+    leader: l ? l.id : null, might: l ? l.might : 0, wits: l ? l.wits : 0 };
+};
+const companyIn = (c, id) => ({ id, kind: 'company', type: c.type, soldiers: c.soldiers, training: 60, leader: null, might: 0, wits: 0 });
+// A summoned spirit: its spell draws on the best Wits among the vassals present.
+const spiritIn = (spiritId, id, vassals) => ({
+  id, kind: 'spirit', type: spiritId, soldiers: SPIRIT_UNIT[spiritId].soldiers, training: 100, leader: null,
+  might: 40, wits: vassals.reduce((a, v) => Math.max(a, v.wits), 0),
 });
 
 export function buildBattleInput(state, march) {
   const pr = state.provinces[march.to];
-  const atk = march.vassals.map(id => state.vassals[id]).filter(v => v && v.soldiers > 0).map(vassalUnit);
-  if (march.company && march.company.soldiers > 0) {
-    atk.push({ id: 'company:a', kind: 'company', type: march.company.type, soldiers: march.company.soldiers, training: 60, might: 50, wits: 50 });
+  const atkVassals = march.vassals.map(id => state.vassals[id]).filter(v => v && v.status === 'active');
+  const atk = march.units.filter(u => u.soldiers > 0).map(u => troopIn(state, u));
+  if (march.fifth?.kind === 'company' && march.fifth.soldiers > 0) atk.push(companyIn(march.fifth, 'company:a'));
+  else if (march.fifth?.kind === 'spirit' && atkVassals.length) atk.push(spiritIn(march.fifth.id, 'spirit:a', atkVassals));
+
+  const defVassals = provinceVassals(state, pr.id);
+  const def = fieldedUnits(state, pr.id).map(u => troopIn(state, u));
+  if (pr.company && pr.company.soldiers > 0) def.push(companyIn(pr.company, 'company:d'));
+  else if (pr.owner && defVassals.length) {
+    const sp = availableSpirit(state, pr.owner);
+    if (sp) def.push(spiritIn(sp, 'spirit:d', defVassals));
   }
-  const def = provinceVassals(state, pr.id).filter(v => v.soldiers > 0).map(vassalUnit);
-  if (pr.company && pr.company.soldiers > 0) {
-    def.push({ id: 'company:d', kind: 'company', type: pr.company.type, soldiers: pr.company.soldiers, training: 60, might: 50, wits: 50 });
-  }
-  if (!pr.owner && pr.militia > 0) {
-    def.push({ id: 'militia', kind: 'militia', type: 'militia', soldiers: pr.militia, training: 30, might: 40, wits: 30 });
-  } else if (pr.owner && !def.length) {
-    def.push({ id: 'militia', kind: 'militia', type: 'militia', soldiers: emptyMilitia(pr), training: 25, might: 35, wits: 30 });
+  if (!pr.owner) {
+    pr.militia.forEach((n, i) => { if (n > 0) def.push({ id: 'militia:' + i, kind: 'militia', type: 'militia', soldiers: n, training: 30, leader: null, might: 0, wits: 0 }); });
+  } else if (!def.some(u => u.kind !== 'spirit')) {
+    def.push({ id: 'levy', kind: 'militia', type: 'militia', soldiers: emptyMilitia(pr), training: 25, leader: null, might: 0, wits: 0 });
   }
   return {
-    provinceId: pr.id, terrain: PROVINCES[pr.id].terrain, siege: !!pr.owner,
-    attacker: { house: march.house, units: atk, spirit: atk.some(u => u.kind === 'vassal') ? availableSpirit(state, march.house) : null },
-    defender: { house: pr.owner, units: def, spirit: def.some(u => u.kind === 'vassal') ? availableSpirit(state, pr.owner) : null },
+    provinceId: pr.id, terrain: PROVINCES[pr.id].terrain, siege: !!pr.owner, season: season(state),
+    attacker: { house: march.house, units: atk },
+    defender: { house: pr.owner, units: def },
   };
 }
 
-// ---------- placing vassals after a battle ----------
-function retreatTarget(state, house, near, prefer) {
+// ---------- placing vassals and units after a battle ----------
+// An own province with room for `nv` more vassals and `nu` more units (prefer `prefer`, then
+// the neighbours of `near`).
+function retreatTarget(state, house, near, prefer, nv = 1, nu = 0) {
   const ok = pid => pid != null && state.provinces[pid].owner === house &&
-    state.provinces[pid].vassals.length < MAX_VASSALS_PER_PROVINCE;
+    state.provinces[pid].vassals.length + nv <= MAX_VASSALS_PER_PROVINCE &&
+    state.provinces[pid].units.length + nu <= MAX_UNITS_PER_PROVINCE;
   if (ok(prefer)) return prefer;
   const ring = [...ADJACENCY[near]].sort((a, b) => a - b);
   for (const n of ring) if (ok(n)) return n;
   return null;
+}
+
+function clearLeader(state, vid) {
+  for (const p of state.provinces) for (const u of p.units) if (u.leader === vid) u.leader = null;
+  for (const m of state.marches) for (const u of m.units) if (u.leader === vid) u.leader = null;
 }
 
 function capture(state, vid, captor) {
@@ -80,7 +99,8 @@ function capture(state, vid, captor) {
     const p = state.provinces[v.location];
     p.vassals = p.vassals.filter(x => x !== vid);
   }
-  v.location = null; v.marching = false; v.soldiers = 0;
+  clearLeader(state, vid);
+  v.location = null; v.marching = false;
   if (captor) { v.status = 'captive'; v.captor = captor; }
   else { v.status = 'exiled'; v.captor = null; }
   addLog(state, captor ? `${vassalName(vid)} is taken captive by ${houseName(captor)}.` : `${vassalName(vid)} flees into exile.`, 'battle');
@@ -106,7 +126,7 @@ function eliminate(state, house, by) {
   if (!h.alive) return;
   h.alive = false;
   for (const v of houseVassals(state, house)) capture(state, v.id, by);
-  for (const m of state.marches) if (m.house === house) m.vassals = [];
+  for (const m of state.marches) if (m.house === house) { m.vassals = []; m.units = []; }
   addLog(state, `${houseName(house)} is destroyed.`, 'story');
   if (house === state.player && !state.autoPlayer) {
     state.defeated = true;
@@ -120,7 +140,27 @@ function fixCapital(state, house) {
   if (!h.alive || state.provinces[h.capital]?.owner === house) return;
   const own = ownedProvinces(state, house);
   if (!own.length) return;
-  h.capital = (own.find(p => p.shard) || own.reduce((a, b) => (b.vassals.length > a.vassals.length ? b : a))).id;
+  h.capital = (own.find(p => p.shard) || own.reduce((a, b) => (b.units.length > a.units.length ? b : a))).id;
+}
+
+// Sends a group (vassals + units, leaders kept) back to an own province; units that find no room
+// are lost (they scatter), vassals with no room are captured by `captor`.
+function sendBack(state, house, near, prefer, vids, units, captor) {
+  let units2 = units.filter(u => u.soldiers > 0);
+  const target = retreatTarget(state, house, near, prefer, 0, 0) ?? null;
+  for (const vid of vids) {
+    const v = state.vassals[vid];
+    if (v.status !== 'active') continue;
+    const to = retreatTarget(state, house, near, prefer, 1, 0);
+    if (to != null) moveVassal(state, vid, to); else capture(state, vid, captor);
+  }
+  for (const u of units2) {
+    const to = retreatTarget(state, house, near, target ?? prefer, 0, 1);
+    if (to == null) continue;
+    const dst = state.provinces[to];
+    if (u.leader && state.vassals[u.leader]?.location !== to) u.leader = null;
+    dst.units.push(u);
+  }
 }
 
 // ---------- applying a battle result ----------
@@ -129,44 +169,54 @@ export function applyBattleResult(state, march, input, result) {
   const defHouse = pr.owner;
   const atkHouse = march.house;
   const si = seasonIndex(state);
-  if (result.attacker.spiritUsed && input.attacker.spirit) state.houses[atkHouse].spiritUsed[input.attacker.spirit] = si;
-  if (result.defender.spiritUsed && input.defender.spirit && defHouse) state.houses[defHouse].spiritUsed[input.defender.spirit] = si;
+  const spiritOf = side => side.units.find(u => u.kind === 'spirit');
+  const as = spiritOf(input.attacker), ds = spiritOf(input.defender);
+  if (as) state.houses[atkHouse].spiritUsed[as.type] = si;
+  if (ds && defHouse) state.houses[defHouse].spiritUsed[ds.type] = si;
 
   const after = (side, id) => side.units.find(u => u.id === id);
+  const left = r => Math.max(0, Math.round(r.soldiers));
   // Update soldiers on both sides.
-  for (const u of input.attacker.units) {
-    const r = after(result.attacker, u.id); if (!r) continue;
-    const left = Math.max(0, Math.round(r.soldiers));
-    if (u.kind === 'vassal') state.vassals[u.vassalId].soldiers = left;
-    else if (u.kind === 'company' && march.company) march.company.soldiers = left;
-  }
-  for (const u of input.defender.units) {
-    const r = after(result.defender, u.id); if (!r) continue;
-    const left = Math.max(0, Math.round(r.soldiers));
-    if (u.kind === 'vassal') state.vassals[u.vassalId].soldiers = left;
-    else if (u.kind === 'company' && pr.company) pr.company.soldiers = left;
-    else if (u.kind === 'militia' && !pr.owner) pr.militia = left;
-  }
-  // Experience: survivors on both sides harden a little.
-  for (const id of march.vassals) { const v = state.vassals[id]; if (v.soldiers > 0) v.training = Math.min(100, v.training + 3); }
+  for (const u of march.units) { const r = after(result.attacker, u.uid); if (r) u.soldiers = left(r); }
+  if (march.fifth?.kind === 'company') { const r = after(result.attacker, 'company:a'); if (r) march.fifth.soldiers = left(r); }
+  for (const u of pr.units) { const r = after(result.defender, u.uid); if (r) u.soldiers = left(r); }
+  if (pr.company) { const r = after(result.defender, 'company:d'); if (r) pr.company.soldiers = left(r); if (pr.company.soldiers <= 0) pr.company = null; }
+  if (!pr.owner) pr.militia = pr.militia.map((n, i) => { const r = after(result.defender, 'militia:' + i); return r ? left(r) : n; }).filter(n => n > 0);
+  march.units = march.units.filter(u => u.soldiers > 0);
+  pr.units = pr.units.filter(u => u.soldiers > 0);
+  // Experience: surviving attackers harden a little.
+  for (const u of march.units) u.training = Math.min(100, u.training + 3);
+  const atkCompany = march.fifth?.kind === 'company' && march.fifth.soldiers > 0 ? { type: march.fifth.type, soldiers: march.fifth.soldiers } : null;
 
   const where = provinceName(pr.id);
   withRng(state, rng => {
+    // Vassals who lost their unit (or never had one) may be captured on the losing side.
+    const leads = (units, vid) => units.some(u => u.leader === vid && u.soldiers > 0);
     if (result.winner === 'attacker') {
-      // Defenders retreat or are captured.
-      for (const v of provinceVassals(state, pr.id)) {
-        const to = defHouse ? retreatTarget(state, defHouse, pr.id, null) : null;
-        if (to != null) moveVassal(state, v.id, to);
-        else capture(state, v.id, atkHouse);
+      const defenders = provinceVassals(state, pr.id).map(v => v.id);
+      const survivors = pr.units;
+      pr.units = [];
+      for (const vid of defenders) {
+        if (defHouse && !leads(survivors, vid) && rng.chance(UNITLESS_CAPTURE)) capture(state, vid, atkHouse);
+      }
+      if (defHouse) {
+        // Survivors fall back together where they can.
+        const keep = defenders.filter(vid => state.vassals[vid].status === 'active');
+        for (const vid of keep) { const p = state.provinces[pr.id]; p.vassals = p.vassals.filter(x => x !== vid); state.vassals[vid].location = null; }
+        sendBack(state, defHouse, pr.id, null, keep, survivors, atkHouse);
+      } else {
+        for (const vid of defenders) capture(state, vid, atkHouse);
       }
       pr.vassals = pr.vassals.filter(id => state.vassals[id].status === 'active' && state.vassals[id].location === pr.id);
       pr.owner = atkHouse;
       pr.company = null;
-      pr.militia = 0;
+      pr.militia = [];
       pr.loyalty = Math.min(pr.loyalty, 45);
       pr.food += march.food;
       for (const id of march.vassals) if (state.vassals[id].status === 'active') moveVassal(state, id, pr.id);
-      if (march.company && march.company.soldiers > 0) pr.company = march.company;
+      pr.units.push(...march.units.slice(0, MAX_UNITS_PER_PROVINCE));
+      for (const u of pr.units) if (u.leader && state.vassals[u.leader]?.location !== pr.id) u.leader = null;
+      if (atkCompany) pr.company = atkCompany;
       state.intel[atkHouse][pr.id] = state.turn;
       addLog(state, `${houseName(atkHouse)} takes ${where}${defHouse ? ' from ' + houseName(defHouse) : ''}.`, 'battle', defHouse ? STORY.siege.art : undefined);
       if (pr.shard) addLog(state, `The ${pr.shard} shard of ${where} passes to ${houseName(atkHouse)}.`, 'story');
@@ -177,16 +227,17 @@ export function applyBattleResult(state, march, input, result) {
       }
     } else {
       // Attackers fall back.
-      for (const id of march.vassals) {
-        const v = state.vassals[id];
-        if (v.status !== 'active') continue;
-        const to = retreatTarget(state, atkHouse, march.from, march.from);
-        if (to != null) moveVassal(state, id, to);
-        else capture(state, id, defHouse);
+      const vids = march.vassals.filter(id => state.vassals[id].status === 'active');
+      const free = [];
+      for (const vid of vids) {
+        if (defHouse && !leads(march.units, vid) && rng.chance(UNITLESS_CAPTURE)) capture(state, vid, defHouse);
+        else free.push(vid);
       }
-      if (march.company && march.company.soldiers > 0) {
+      sendBack(state, atkHouse, march.from, march.from, free, march.units, defHouse);
+      march.units = [];
+      if (atkCompany) {
         const back = state.provinces[march.from];
-        if (back.owner === atkHouse && !back.company) back.company = march.company;
+        if (back.owner === atkHouse && !back.company) back.company = atkCompany;
       }
       addLog(state, `${houseName(atkHouse)} is driven back from ${where}.`, 'battle');
       if (defHouse) loyaltyShock(state, rng, atkHouse, defHouse);
@@ -259,12 +310,15 @@ export async function endMonth(state, opts = {}) {
 }
 
 function returnHome(state, m) {
-  for (const id of m.vassals) {
+  const vids = m.vassals.filter(id => {
     const v = state.vassals[id];
-    if (!v || v.status !== 'active' || !v.marching) continue;
-    const to = retreatTarget(state, v.house, m.from, m.from);
-    if (to != null) moveVassal(state, id, to);
-    else capture(state, id, state.provinces[m.from].owner);
+    return v && v.status === 'active' && v.marching;
+  });
+  sendBack(state, m.house, m.from, m.from, vids, m.units, state.provinces[m.from].owner === m.house ? null : state.provinces[m.from].owner);
+  m.units = []; m.vassals = [];
+  if (m.fifth?.kind === 'company') {
+    const back = state.provinces[m.from];
+    if (back.owner === m.house && !back.company) back.company = { type: m.fifth.type, soldiers: m.fifth.soldiers };
   }
 }
 
@@ -273,16 +327,15 @@ async function resolveMarch(state, m, opts, summary) {
     const v = state.vassals[id];
     return v && v.status === 'active' && v.house === m.house && v.marching;
   });
-  if (!m.vassals.length || !state.houses[m.house].alive) return;
+  if (!state.houses[m.house].alive) return;
+  if (!m.vassals.length) { returnHome(state, m); return; }
   const target = state.provinces[m.to];
   // Target became ours meanwhile: just move in (if room), else go home.
   if (target.owner === m.house) {
-    for (const id of m.vassals) {
-      const to = retreatTarget(state, m.house, m.to, m.to);
-      if (to != null) moveVassal(state, id, to); else capture(state, id, null);
-    }
+    sendBack(state, m.house, m.from, m.to, m.vassals, m.units, null);
+    m.units = [];
     target.food += m.food;
-    if (m.company && !target.company) target.company = m.company;
+    if (m.fifth?.kind === 'company' && !target.company) target.company = { type: m.fifth.type, soldiers: m.fifth.soldiers };
     return;
   }
   const input = buildBattleInput(state, m);

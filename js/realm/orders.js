@@ -2,36 +2,54 @@
 // applyOrder(state, order) validates and applies one order, marks the province as ordered and
 // returns { ok, msg }. Mutates state.
 //
-// A march to a foreign province is queued in state.marches (resolved in turn.js at month end):
-// the vassals leave the province at once (location = null, marching = true).
+// v2 army model: troop units live in province.units and are separate from vassals.
+//  - muster  {province, troop, soldiers, unit?}  adds to `unit` (uid) or raises a new unit of
+//                                                 troop type `troop` (order.type is 'muster')
+//  - train   {province, unit?}                    one unit, or every unit in the province
+//  - assign  {province, unit, vassal|null}        FREE action (does not use the month's order)
+//  - march   {from, to, units:[uid] (<=4), vassals:[vid], fifth:'company'|'spirit'|null, food}
+//  - disband {province, unit}
+// Leaders of the chosen units always march with them. A march to a foreign province is queued in
+// state.marches (resolved in turn.js at month end); its units and vassals leave the province now.
+// Attacks need at least one vassal. Transfers between own provinces need no vassal.
+//
+// UI helpers: marchOptions(state, pid) and musterOptions(state, pid) describe the choices.
 
-import { TROOPS, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE } from '../data/units.js';
-import { isAdjacent } from '../data/world.js';
+import {
+  TROOPS, TROOP_TYPES, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE,
+  MAX_UNITS_PER_ARMY,
+} from '../data/units.js';
+import { SPIRIT_UNIT } from '../data/spirits.js';
+import { isAdjacent, isSeaLane } from '../data/world.js';
 import {
   provinceVassals, governorOf, envoyOf, withRng, atPeace, addLog, provinceName, houseName,
-  vassalName, captivesOf, isPlayerControlled,
+  vassalName, captivesOf, isPlayerControlled, newUid, availableSpirit, troopPower, leaderOf,
+  unitName,
 } from './state.js';
 import { doDiplomacy, DIPLOMACY } from './diplomacy.js';
 
 export const DEVELOP_COST = 30;
 export const SPY_COST = 20;
 export const FEAST_FOOD = 20;
-export const MAX_MARCH = 5;
+export const MAX_MARCH = MAX_UNITS_PER_ARMY;   // troop units per army (plus the 5th slot)
+export const NEW_UNIT_TRAINING = 20;
 
 export const ORDER_LABELS = {
   develop: 'Develop', muster: 'Muster', train: 'Train', hire: 'Hire company', dismiss: 'Dismiss company',
   march: 'March', supply: 'Send supplies', govern: 'Govern', diplomacy: 'Diplomacy', spy: 'Spy',
-  recruit: 'Recruit captive', rest: 'Rest',
+  recruit: 'Recruit captive', disband: 'Disband unit', rest: 'Rest',
 };
 
 const clamp = (x, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
 export const musterCost = (troop, soldiers) => Math.ceil(soldiers / 10) * TROOPS[troop].cost;
 export const developGain = gov => Math.round(4 + (gov ? gov.wits / 20 : -2));
-export const trainGain = v => Math.round(10 + v.might / 10);
+// Drill gain for a unit: its leader's Might helps; leaderless units drill slower.
+export const trainGain = leader => Math.round(leader ? 10 + leader.might / 10 : 8);
 export const recruitChance = (envoy, captive) =>
   Math.max(0.05, Math.min(0.9, envoy.charm / 150 + (100 - captive.loyalty) / 250));
 
 // Order availability for the UI: [{ type, label, cost, disabled: reason|null }].
+// 'assign' is a free action and is not listed (use assignLeader / applyOrder type 'assign').
 export function listOrders(state, pid) {
   const pr = state.provinces[pid];
   const house = pr.owner;
@@ -43,26 +61,77 @@ export function listOrders(state, pid) {
   const noV = vs.length ? null : 'Needs a vassal in the province.';
   const foreignAdj = adjacentForeign(state, pid);
   const ownAdj = adjacentOwn(state, pid);
+  const cheapestTroop = Math.min(...Object.values(TROOPS).map(t => t.cost));
+  const canRaise = pr.units.length < MAX_UNITS_PER_PROVINCE;
+  const canAdd = pr.units.some(u => u.soldiers < MAX_SOLDIERS);
 
   add('develop', DEVELOP_COST, done || (pr.gold < DEVELOP_COST ? `Needs ${DEVELOP_COST} gold.` : null));
   add('govern', FEAST_FOOD, done);
-  add('muster', TROOPS.footmen.cost, done || noV || (pr.gold < TROOPS.footmen.cost ? 'No gold.' : null));
-  add('train', 0, done || noV);
+  add('muster', cheapestTroop, done || (!canRaise && !canAdd ? 'No room for more soldiers.' : pr.gold < cheapestTroop ? 'No gold.' : null));
+  add('train', 0, done || (!pr.units.length ? 'No units to drill.' : null));
   const cheapest = Math.min(...Object.values(COMPANIES).map(c => c.hire));
-  add('hire', cheapest, done || noV || (pr.company ? 'A company is already here.' : pr.gold < cheapest ? `Needs ${cheapest} gold.` : null));
+  add('hire', cheapest, done || (pr.company ? 'A company is already here.' : pr.gold < cheapest ? `Needs ${cheapest} gold.` : null));
   if (pr.company) add('dismiss', 0, done);
-  add('march', 0, done || noV || (!foreignAdj.length && !ownAdj.length ? 'Nowhere to march.' : null));
-  add('supply', 0, done || noV || (!ownAdj.length ? 'No neighbouring province of yours.' : null));
+  const mo = marchOptions(state, pid);
+  add('march', 0, done || (!mo.units.length && !mo.vassals.length && !pr.company ? 'No one to march.' :
+    !foreignAdj.length && !ownAdj.length ? 'Nowhere to march.' : null));
+  add('supply', 0, done || (!ownAdj.length ? 'No neighbouring province of yours.' : null));
   add('diplomacy', 0, done || noV);
   add('spy', SPY_COST, done || noV || (pr.gold < SPY_COST ? `Needs ${SPY_COST} gold.` : null));
   add('recruit', 0, done || noV || (!captivesOf(state, house).length ? 'No captives.' : null));
+  if (pr.units.length) add('disband', 0, done);
   add('rest', 0, done);
   return out;
 }
 
+// Everything the march dialog needs.
+//   units:   [{ uid, type, name, soldiers, training, leader, power }]   (max MAX_MARCH chosen)
+//   vassals: [{ id, name, leads: uid|null, might, wits }]
+//   fifth:   [{ kind: 'company', type, name, soldiers } | { kind: 'spirit', id, name }]
+//   targets: { attack: [pid], transfer: [pid], seaLanes: [pid] }   (seaLanes: reached by sea)
+//   maxUnits, needsVassalToAttack: true
+export function marchOptions(state, pid) {
+  const pr = state.provinces[pid];
+  const house = pr.owner;
+  const units = pr.units.filter(u => u.soldiers > 0).map(u => ({
+    uid: u.uid, type: u.type, name: unitName(u), soldiers: u.soldiers, training: u.training,
+    leader: u.leader, power: Math.round(troopPower(state, u)),
+  }));
+  const vassals = provinceVassals(state, pid).map(v => ({
+    id: v.id, name: vassalName(v.id), leads: pr.units.find(u => u.leader === v.id)?.uid ?? null,
+    might: v.might, wits: v.wits,
+  }));
+  const fifth = [];
+  if (pr.company) fifth.push({ kind: 'company', type: pr.company.type, name: COMPANIES[pr.company.type].name, soldiers: pr.company.soldiers });
+  const sp = house ? availableSpirit(state, house) : null;
+  if (sp && vassals.length) fifth.push({ kind: 'spirit', id: sp, name: sp, soldiers: SPIRIT_UNIT[sp].soldiers });
+  const attack = house ? adjacentForeign(state, pid).filter(t => {
+    const o = state.provinces[t].owner;
+    return !(o && atPeace(state, house, o));
+  }) : [];
+  const transfer = house ? adjacentOwn(state, pid) : [];
+  const seaLanes = [...attack, ...transfer].filter(t => isSeaLane(pid, t));
+  return { units, vassals, fifth, targets: { attack, transfer, seaLanes }, maxUnits: MAX_MARCH, needsVassalToAttack: true };
+}
+
+// Everything the muster dialog needs.
+//   types:  [{ type, name, costPer10 }]   for a new unit
+//   units:  [{ uid, type, name, soldiers, room }]   existing units that can grow
+//   canRaise: whether a new unit fits; maxSoldiers; gold
+export function musterOptions(state, pid) {
+  const pr = state.provinces[pid];
+  return {
+    types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: TROOPS[t].cost })),
+    units: pr.units.filter(u => u.soldiers < MAX_SOLDIERS)
+      .map(u => ({ uid: u.uid, type: u.type, name: unitName(u), soldiers: u.soldiers, room: MAX_SOLDIERS - u.soldiers })),
+    canRaise: pr.units.length < MAX_UNITS_PER_PROVINCE,
+    maxSoldiers: MAX_SOLDIERS, gold: pr.gold,
+  };
+}
+
 export function adjacentForeign(state, pid) {
   const pr = state.provinces[pid];
-  return [...state.provinces].filter(p => p.owner !== pr.owner && isAdjacent(pid, p.id)).map(p => p.id);
+  return state.provinces.filter(p => p.owner !== pr.owner && isAdjacent(pid, p.id)).map(p => p.id);
 }
 export function adjacentOwn(state, pid) {
   const pr = state.provinces[pid];
@@ -70,6 +139,21 @@ export function adjacentOwn(state, pid) {
 }
 
 const fail = msg => ({ ok: false, msg });
+
+// Free action: put vassal `vid` (or nobody, vid = null) at the head of unit `uid` in province `pid`.
+// The vassal leaves any unit it led before; the unit's previous leader becomes free.
+export function assignLeader(state, pid, uid, vid) {
+  const pr = state.provinces[pid];
+  if (!pr || !pr.owner) return fail('Not your province.');
+  const u = pr.units.find(x => x.uid === uid);
+  if (!u) return fail('No such unit here.');
+  if (vid == null) { u.leader = null; return { ok: true, msg: `The ${unitName(u).toLowerCase()} have no leader now.` }; }
+  const v = state.vassals[vid];
+  if (!v || v.status !== 'active' || v.location !== pid || v.house !== pr.owner) return fail('That vassal is not here.');
+  for (const o of pr.units) if (o.leader === vid) o.leader = null;
+  u.leader = vid;
+  return { ok: true, msg: `${vassalName(vid)} takes command of the ${unitName(u).toLowerCase()}.` };
+}
 
 export function applyOrder(state, order) {
   if (state.winner || state.defeated) return fail('The game is over.');
@@ -79,9 +163,10 @@ export function applyOrder(state, order) {
   const house = pr.owner;
   if (!house) return fail('Not your province.');
   if (order.house && order.house !== house) return fail('Not your province.');
+  if (order.type === 'assign') return assignLeader(state, pid, order.unit, order.vassal ?? null);
   if (pr.ordered) return fail('This province has already acted this month.');
   const vs = provinceVassals(state, pid);
-  const needV = !['develop', 'govern', 'rest', 'dismiss'].includes(order.type);
+  const needV = ['diplomacy', 'spy', 'recruit'].includes(order.type);
   if (needV && !vs.length) return fail('Needs a vassal in the province.');
   const handler = HANDLERS[order.type];
   if (!handler) return fail('Unknown order.');
@@ -120,31 +205,48 @@ const HANDLERS = {
     return fail('Feast or tax.');
   },
 
-  muster(state, pr, house, o, vs) {
-    const v = vs.find(x => x.id === o.vassal);
-    if (!v) return fail('That vassal is not here.');
-    let n = Math.floor(Math.min(o.soldiers | 0, MAX_SOLDIERS - v.soldiers) / 10) * 10;
-    const affordable = Math.floor(pr.gold / TROOPS[v.troop].cost) * 10;
+  muster(state, pr, house, o) {
+    let u = o.unit ? pr.units.find(x => x.uid === o.unit) : null;
+    if (o.unit && !u) return fail('That unit is not here.');
+    const type = u ? u.type : o.troop;
+    if (!TROOPS[type]) return fail('Choose a troop type.');
+    if (!u && pr.units.length >= MAX_UNITS_PER_PROVINCE) return fail(`At most ${MAX_UNITS_PER_PROVINCE} units in a province.`);
+    const have = u ? u.soldiers : 0;
+    let n = Math.floor(Math.min(o.soldiers | 0, MAX_SOLDIERS - have) / 10) * 10;
+    const affordable = Math.floor(pr.gold / TROOPS[type].cost) * 10;
     n = Math.min(n, affordable);
-    if (n <= 0) return fail(v.soldiers >= MAX_SOLDIERS ? 'This unit is at full strength.' : 'Not enough gold.');
-    const cost = musterCost(v.troop, n);
+    if (n <= 0) return fail(have >= MAX_SOLDIERS ? 'This unit is at full strength.' : 'Not enough gold.');
+    const cost = musterCost(type, n);
     pr.gold -= cost;
-    v.training = Math.round((v.training * v.soldiers + 20 * n) / (v.soldiers + n));
-    v.soldiers += n;
+    if (u) {
+      u.training = Math.round((u.training * u.soldiers + NEW_UNIT_TRAINING * n) / (u.soldiers + n));
+      u.soldiers += n;
+    } else {
+      u = { uid: newUid(state), type, soldiers: n, training: NEW_UNIT_TRAINING, leader: null };
+      pr.units.push(u);
+    }
     pr.loyalty = clamp(pr.loyalty - 2);
-    return { ok: true, msg: `${vassalName(v.id)} musters ${n} ${TROOPS[v.troop].name.toLowerCase()} for ${cost} gold.` };
+    return { ok: true, unit: u.uid, msg: `${n} ${TROOPS[type].name.toLowerCase()} mustered for ${cost} gold.` };
   },
 
-  train(state, pr, house, o, vs) {
-    const targets = o.vassal ? vs.filter(x => x.id === o.vassal) : vs;
-    if (!targets.length) return fail('That vassal is not here.');
-    const parts = [];
-    for (const v of targets) {
-      const g = trainGain(v);
-      v.training = clamp(v.training + g);
-      parts.push(`${vassalName(v.id)} ${v.training}`);
+  train(state, pr, house, o) {
+    const targets = o.unit ? pr.units.filter(x => x.uid === o.unit) : pr.units;
+    if (!targets.length) return fail(o.unit ? 'That unit is not here.' : 'No units to drill.');
+    let best = 0;
+    for (const u of targets) {
+      const g = trainGain(leaderOf(state, u));
+      u.training = clamp(u.training + g);
+      best = Math.max(best, u.training);
     }
-    return { ok: true, msg: `Drilling: ${parts.join(', ')}.` };
+    return { ok: true, msg: targets.length === 1 ? `Drilling: ${unitName(targets[0])} ${targets[0].training}.` : `${targets.length} units drill (best ${best}).` };
+  },
+
+  disband(state, pr, house, o) {
+    const i = pr.units.findIndex(x => x.uid === o.unit);
+    if (i < 0) return fail('That unit is not here.');
+    const [u] = pr.units.splice(i, 1);
+    pr.loyalty = clamp(pr.loyalty + 2);
+    return { ok: true, msg: `The ${unitName(u).toLowerCase()} go home to their fields.` };
   },
 
   hire(state, pr, house, o) {
@@ -167,31 +269,55 @@ const HANDLERS = {
   march(state, pr, house, o, vs) {
     const to = state.provinces[o.to];
     if (!to || !isAdjacent(pr.id, to.id)) return fail('You can only march to a neighbouring province.');
-    const ids = [...new Set(o.vassals || [])];
-    const marchers = ids.map(id => vs.find(v => v.id === id));
-    if (!ids.length || marchers.some(v => !v)) return fail('Choose vassals in this province.');
-    if (ids.length > MAX_MARCH) return fail(`At most ${MAX_MARCH} vassals march together.`);
+    const uids = [...new Set(o.units || [])];
+    const units = uids.map(id => pr.units.find(u => u.uid === id));
+    if (units.some(u => !u)) return fail('Choose units in this province.');
+    if (uids.length > MAX_MARCH) return fail(`At most ${MAX_MARCH} units march together (plus a company or spirit).`);
+    // Leaders go with their units.
+    const vids = new Set(o.vassals || []);
+    for (const u of units) if (u.leader) vids.add(u.leader);
+    const marchers = [...vids].map(id => vs.find(v => v.id === id));
+    if (marchers.some(v => !v)) return fail('Choose vassals in this province.');
     const food = Math.max(0, Math.min(o.food | 0, pr.food));
-    const bringCompany = !!o.company && !!pr.company;
+    const fifthKind = o.fifth === true ? 'company' : o.fifth || (o.company ? 'company' : null);
+
     if (to.owner === house) {
-      if (to.vassals.length + ids.length > MAX_VASSALS_PER_PROVINCE) return fail(`${provinceName(to.id)} has room for ${MAX_VASSALS_PER_PROVINCE - to.vassals.length} more.`);
+      if (!units.length && !marchers.length && fifthKind !== 'company') return fail('Choose who marches.');
+      if (to.vassals.length + marchers.length > MAX_VASSALS_PER_PROVINCE) return fail(`${provinceName(to.id)} has room for ${MAX_VASSALS_PER_PROVINCE - to.vassals.length} more vassals.`);
+      if (to.units.length + units.length > MAX_UNITS_PER_PROVINCE) return fail(`${provinceName(to.id)} has room for ${MAX_UNITS_PER_PROVINCE - to.units.length} more units.`);
+      const bringCompany = fifthKind === 'company' && pr.company;
       if (bringCompany && to.company) return fail(`${provinceName(to.id)} already has a company.`);
-      for (const v of marchers) moveVassal(state, v.id, to.id);
+      for (const v of marchers) {
+        for (const u of pr.units) if (u.leader === v.id && !units.includes(u)) u.leader = null;
+        moveVassal(state, v.id, to.id);
+      }
+      for (const u of units) { pr.units.splice(pr.units.indexOf(u), 1); to.units.push(u); }
       if (bringCompany) { to.company = pr.company; pr.company = null; }
       pr.food -= food; to.food += food;
-      return { ok: true, msg: `${ids.length} vassal(s) move to ${provinceName(to.id)}.` };
+      return { ok: true, msg: `${describeMove(units.length, marchers.length)} move to ${provinceName(to.id)}.` };
     }
     if (to.owner && atPeace(state, house, to.owner)) return fail(`You are at peace with ${houseName(to.owner)}.`);
-    if (!marchers.some(v => v.soldiers > 0) && !bringCompany) return fail('The marching vassals have no soldiers.');
+    if (!marchers.length) return fail('An attack needs a vassal to command it.');
+    let fifth = null;
+    if (fifthKind === 'company') {
+      if (!pr.company) return fail('There is no company here.');
+      fifth = { kind: 'company', type: pr.company.type, soldiers: pr.company.soldiers };
+    } else if (fifthKind === 'spirit') {
+      const sp = availableSpirit(state, house);
+      if (!sp) return fail('No spirit can be summoned this season.');
+      fifth = { kind: 'spirit', id: sp };
+    }
+    if (!units.some(u => u.soldiers > 0) && !fifth) return fail('The attack needs soldiers.');
     for (const v of marchers) {
+      for (const u of pr.units) if (u.leader === v.id && !units.includes(u)) u.leader = null;
       pr.vassals = pr.vassals.filter(x => x !== v.id);
       v.location = null; v.marching = true;
     }
-    const company = bringCompany ? pr.company : null;
-    if (bringCompany) pr.company = null;
+    for (const u of units) pr.units.splice(pr.units.indexOf(u), 1);
+    if (fifth?.kind === 'company') pr.company = null;
     pr.food -= food;
-    state.marches.push({ house, from: pr.id, to: to.id, vassals: ids, company, food });
-    return { ok: true, msg: `${ids.length} vassal(s) march on ${provinceName(to.id)}.` };
+    state.marches.push({ house, from: pr.id, to: to.id, units, vassals: marchers.map(v => v.id), fifth, food });
+    return { ok: true, msg: `${describeMove(units.length, marchers.length)} march on ${provinceName(to.id)}${isSeaLane(pr.id, to.id) ? ' by sea' : ''}.` };
   },
 
   supply(state, pr, house, o) {
@@ -229,7 +355,7 @@ const HANDLERS = {
     return withRng(state, rng => {
       if (rng.chance(recruitChance(envoy, c))) {
         c.house = house; c.status = 'active'; c.captor = null; c.loyalty = 50;
-        c.location = pr.id; c.soldiers = 0; c.marching = false;
+        c.location = pr.id; c.marching = false;
         pr.vassals.push(c.id);
         addLog(state, `${vassalName(c.id)} swears service to ${houseName(house)}.`, 'info');
         return { ok: true, success: true, msg: `${vassalName(c.id)} joins your house.` };
@@ -240,11 +366,20 @@ const HANDLERS = {
   },
 };
 
+function describeMove(nu, nv) {
+  const parts = [];
+  if (nu) parts.push(`${nu} unit${nu > 1 ? 's' : ''}`);
+  if (nv) parts.push(`${nv} vassal${nv > 1 ? 's' : ''}`);
+  return parts.join(' and ') || 'The company';
+}
+
+// Moves a vassal alone (units are moved by the caller). Clears leadership of units left behind.
 export function moveVassal(state, vid, toPid) {
   const v = state.vassals[vid];
   if (v.location != null) {
     const src = state.provinces[v.location];
     src.vassals = src.vassals.filter(x => x !== vid);
+    for (const u of src.units) if (u.leader === vid) u.leader = null;
   }
   v.location = toPid;
   v.marching = false;
@@ -255,8 +390,9 @@ export function spyReport(state, pid) {
   const p = state.provinces[pid];
   return {
     province: pid, owner: p.owner, food: p.food, gold: p.gold, fields: p.fields, market: p.market,
-    loyalty: p.loyalty, militia: p.militia, company: p.company ? { ...p.company } : null, shard: p.shard,
-    vassals: provinceVassals(state, pid).map(v => ({ id: v.id, troop: v.troop, soldiers: v.soldiers, training: v.training, loyalty: v.loyalty })),
+    loyalty: p.loyalty, militia: [...p.militia], company: p.company ? { ...p.company } : null, shard: p.shard,
+    units: p.units.map(u => ({ uid: u.uid, type: u.type, soldiers: u.soldiers, training: u.training, leader: u.leader })),
+    vassals: provinceVassals(state, pid).map(v => ({ id: v.id, loyalty: v.loyalty, might: v.might, wits: v.wits })),
   };
 }
 

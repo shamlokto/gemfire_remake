@@ -151,10 +151,12 @@ function showSpyReport(r) {
   modal(close => ({
     title: `Spies report: ${P.name}`,
     body: [h('p', `${r.owner ? HOUSE_BY_ID[r.owner].name : 'Free hold'} · gold ${r.gold} · food ${r.food} · loyalty ${r.loyalty}`),
-      r.militia ? h('p', `Militia: ${r.militia}`) : null,
+      (Array.isArray(r.militia) ? r.militia.length : r.militia) ? h('p', `Militia: ${Array.isArray(r.militia) ? r.militia.join(' + ') : r.militia}`) : null,
+      ...(r.units || []).map(u => h('div.vassal', u.leader ? portrait(u.leader, { size: 40 }) : h('div', { style: { width: '40px', textAlign: 'center' } }, '⚔'),
+        h('div', h('div.nm', `${TROOPS[u.type]?.name || u.type} · ${u.soldiers}`), h('div.mini', `training ${u.training} · ${u.leader ? 'led by ' + (VASSAL_BY_ID[u.leader]?.name || '') : 'no leader'}`)))),
       r.company ? h('p', `Company: ${COMPANIES[r.company.type]?.name || r.company.type} (${r.company.soldiers})`) : null,
       r.shard ? h('p', `It holds the ${SPIRITS[r.shard].name} shard.`) : null,
-      ...r.vassals.map(v => h('div.vassal', portrait(v.id, { size: 40 }), h('div', h('div.nm', VASSAL_BY_ID[v.id]?.name || ''), h('div.mini', `${TROOPS[v.troop]?.name || v.troop} ${v.soldiers} · training ${v.training} · loyalty ${v.loyalty}`))))],
+      ...r.vassals.map(v => h('div.vassal', portrait(v.id, { size: 40 }), h('div', h('div.nm', VASSAL_BY_ID[v.id]?.name || ''), h('div.mini', `Might ${v.might} · Wits ${v.wits} · loyalty ${v.loyalty}`))))],
     foot: [h('button.btn.primary', { onclick: () => close() }, 'Close')],
   }), { backdrop: ORDER_BACKDROP.spy });
 }
