@@ -27,7 +27,7 @@ import { HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
 import { SPIRITS } from '../data/spirits.js';
 import { PROVINCES } from '../data/world.js';
-import { palette, squadSize, formation, attackAct, MOUNTED, POWDER, launchPoint } from './battle-anim/figures.js';
+import { palette, squadSize, formation, attackAct, MOUNTED, POWDER, FLYING, HUGE, launchPoint } from './battle-anim/figures.js';
 import { blitFigure } from './battle-anim/figcache.js';
 import { drawSpirit } from './battle-anim/spirit-art.js';
 import { Particles, reducedMotion, blob } from './battle-anim/fx.js';
@@ -512,10 +512,10 @@ export async function runBattle(container, input, opts = {}) {
     if (d.act) {
       const st = d.act.t0 + f.i * (d.act.stagger ?? 55);
       const k = clamp((view.now - st) / d.act.len, 0, 1);
-      if (view.now >= st && k < 1) return { act: d.act.name, k, t };
+      if (view.now >= st && k < 1) return { act: d.act.name, k, t, v: f.i };
     }
-    if (d.walking) return { act: 'idle', walk: d.walkPh + f.ph * 0.3, t, run: d.run };
-    return { act: 'idle', t: t + f.ph };
+    if (d.walking) return { act: 'idle', walk: d.walkPh + f.ph * 0.3, t, run: d.run, v: f.i };
+    return { act: 'idle', t: t + f.ph, v: f.i };
   }
 
   function drawUnit(u, d) {
@@ -543,7 +543,7 @@ export async function runBattle(container, input, opts = {}) {
     if (!isSpirit(u)) {
       const squad = squadOf(u, d);
       const n = squad.length;
-      const s = cs * (n >= 5 ? 0.54 : n >= 3 ? 0.58 : n === 2 ? 0.64 : 0.72) * (u.type === 'siege' || u.type === 'bombards' ? 0.95 : 1);
+      const s = cs * (n >= 5 ? 0.54 : n >= 3 ? 0.58 : n === 2 ? 0.64 : 0.72) * (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') ? 0.95 : u.type === 'giants' ? 0.62 : HUGE.has(u.type) ? 0.72 : 1);
       const order = squad.slice().sort((p, q) => p.pos[1] - q.pos[1]);
       // soft shadows first
       for (const f of order) {
@@ -1165,7 +1165,7 @@ export async function runBattle(container, input, opts = {}) {
       const e = events[i];
       if (e.t === 'move') {
         const d = view.disp.get(e.unit), u = getUnit(b, e.unit);
-        const mounted = MOUNTED.has(u.type) || u.type === 'wyvern';
+        const mounted = MOUNTED.has(u.type) || FLYING.has(u.type);
         if (mounted) sfx.play('hooves');
         const dist2 = Math.abs(e.to.x - e.from.x) + Math.abs(e.to.y - e.from.y);
         const from = { ...e.from };
@@ -1263,7 +1263,7 @@ export async function runBattle(container, input, opts = {}) {
     if (!ranged && def.x !== att.x) dD.facing = att.x > def.x ? 1 : -1;
     const showClash = cutMode() !== 'off' && (!ranged || cutMode() === 'full');
     const a = px(att.x, att.y), bb = px(def.x, def.y);
-    const mounted = MOUNTED.has(att.type) || att.type === 'wyvern';
+    const mounted = MOUNTED.has(att.type) || FLYING.has(att.type);
     const act = attackAct(att.type);
     if (showClash) {
       // a short wind-up on the board, then the clash scene
@@ -1277,7 +1277,7 @@ export async function runBattle(container, input, opts = {}) {
       await tween(240, k => { dD.flash = 1 - k; dA.flash = Math.min(dA.flash, 1 - k); });
     } else if (ranged) {
       // a volley on the board: draw, loose, arrows in flight, landing spread over the square
-      const engine = att.type === 'siege' || att.type === 'bombards';
+      const engine = att.type === 'siege' || (att.type === 'bombards' || att.type === 'bombard');
       const powder = POWDER.has(att.type);
       dA.act = { name: engine ? 'loose' : 'draw', t0: view.now, len: engine ? 700 : 420, stagger: engine ? 0 : 40 };
       await wait(engine ? 280 : 400);
@@ -1287,7 +1287,7 @@ export async function runBattle(container, input, opts = {}) {
       const onLand = () => { landed++; };
       if (engine) {
         sfx.play('catapult');
-        if (att.type === 'bombards') { view.P.flash(from.x, from.y, 0.9, [255, 220, 150]); view.P.smoke(from.x, from.y, 6, 0.6, 150, 0); shakeBy(6); }
+        if ((att.type === 'bombards' || att.type === 'bombard')) { view.P.flash(from.x, from.y, 0.9, [255, 220, 150]); view.P.smoke(from.x, from.y, 6, 0.6, 150, 0); shakeBy(6); }
         view.projectiles.push({ a: from, b: { x: bb.x, y: bb.y }, t0: view.now, dur: (att.type === 'siege' ? 720 : 300) / speed(), kind: att.type === 'siege' ? 'stone' : 'ball',
           arc: att.type === 'siege' ? cs * 2.6 + Math.abs(bb.x - a.x) * 0.15 : cs * 0.3, onLand });
       } else {

@@ -11,7 +11,7 @@
 //   hit: { killed, ranged, rout }, counter: { killed, rout } | null }
 // Scene space: 480 x 200, ground rows at y 150 (back) and 170 (front); attackers on the left.
 
-import { MOUNTED, RANGED, POWDER, attackAct } from './figures.js';
+import { MOUNTED, RANGED, POWDER, FLYING, HUGE, attackAct } from './figures.js';
 
 export const SW = 480, SH = 200;
 const FRONT_Y = 172, BACK_Y = 150;
@@ -24,8 +24,10 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function squadCount(u) {
   if (u.kind === 'spirit') return 1;
-  if (u.type === 'siege' || u.type === 'bombards' || u.type === 'golem') return 1;
-  if (u.type === 'wyvern') return u.before >= 30 ? 2 : 1;
+  if (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') || u.type === 'golem') return 1;
+  if (u.type === 'wyvern' || u.type === 'giants') return u.before >= 30 ? 2 : 1;
+  if (u.type === 'trolls') return clamp(Math.round(u.before / 25), 2, 3);
+  if (u.type === 'harpies') return clamp(Math.round(u.before / 18), 3, 5);
   if (MOUNTED.has(u.type)) return clamp(Math.round(u.before / 30), 2, 7);
   return clamp(Math.round(u.before / 22), 3, 12);
 }
@@ -44,8 +46,8 @@ export class ClashScene {
     this.aRanged = !!cfg.hit.ranged;
     this.aSpirit = A.kind === 'spirit';
     this.dSpirit = D.kind === 'spirit';
-    this.aMounted = MOUNTED.has(A.type) || A.type === 'wyvern';
-    this.dHolds = RANGED.has(D.type) || D.type === 'siege' || D.type === 'bombards';
+    this.aMounted = MOUNTED.has(A.type) || FLYING.has(A.type);
+    this.dHolds = RANGED.has(D.type) || D.type === 'siege' || (D.type === 'bombards' || D.type === 'bombard');
     // contact lines
     this.contactA = this.dHolds ? 286 : (this.aMounted ? 238 : 226);
     this.contactD = this.dHolds ? 316 : (this.aMounted ? 262 : 254);
@@ -54,9 +56,9 @@ export class ClashScene {
     // timeline (frames)
     const tl = {};
     if (this.aRanged) {
-      if (A.type === 'siege' || A.type === 'bombards') {
+      if (A.type === 'siege' || (A.type === 'bombards' || A.type === 'bombard')) {
         tl.fire = [Math.round(30 * T)];
-        tl.flight = A.type === 'bombards' ? 18 : 36;
+        tl.flight = (A.type === 'bombards' || A.type === 'bombard') ? 18 : 36;
       } else {
         tl.fire = this.short ? [Math.round(18 * T)] : [40, 92];
         tl.flight = POWDER.has(A.type) ? 8 : 26;
@@ -79,7 +81,7 @@ export class ClashScene {
   build(side, u) {
     const n = squadCount(u);
     const dir = side === 'attacker' ? 1 : -1;
-    const big = u.kind === 'spirit' || u.type === 'siege' || u.type === 'bombards' || u.type === 'golem' || u.type === 'wyvern';
+    const big = u.kind === 'spirit' || u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard') || HUGE.has(u.type) || u.type === 'wyvern';
     const startFront = side === 'attacker'
       ? (this.short ? (this.aRanged ? 140 : this.contactA - 46) : (this.aRanged ? 120 : -10))
       : (this.short ? (this.dHolds ? this.contactD : this.contactD + 30) : (this.dHolds ? this.contactD : 330));
@@ -87,11 +89,11 @@ export class ClashScene {
       const rank = big ? 0 : i % 2, file = big ? i : (i >> 1);
       const gap = MOUNTED.has(u.type) ? 46 : big ? 80 : 26;
       const x = side === 'attacker' ? startFront - file * gap - rank * 10 : startFront + file * gap + rank * 10;
-      const y = (u.type === 'wyvern' ? 150 : rank ? BACK_Y : FRONT_Y) + (this.r() - 0.5) * 4;
+      const y = (FLYING.has(u.type) ? 150 + (i % 2) * 14 : rank ? BACK_Y : FRONT_Y) + (this.r() - 0.5) * 4;
       this.actors.push({
         id: `${side[0]}${i}`, side, type: u.kind === 'spirit' ? 'spirit' : u.type, spirit: u.spirit, kind: u.kind,
-        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 92 : (u.type === 'siege' || u.type === 'bombards') ? 58 : 40,
-        walk: this.r() * 6, moving: false, run: false, act: 'idle', actF0: 0, actLen: 1,
+        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 92 : (u.type === 'siege' || (u.type === 'bombards' || u.type === 'bombard')) ? 58 : 40,
+        v: i, walk: this.r() * 6, moving: false, run: false, act: 'idle', actF0: 0, actLen: 1,
         dead: false, deadF: 0, flee: false, fleeF: 0, alpha: 1, glow: 0,
       });
     }
@@ -125,18 +127,18 @@ export class ClashScene {
     // falls spread across the exchange
     const spread = (list, f0, f1) => list.forEach((a, i) => { a.fallAt = Math.round(f0 + (f1 - f0) * (list.length === 1 ? 0.35 : i / (list.length - 1))); });
     if (this.aRanged) {
-      const hits = this.cfg.att.type === 'siege' || this.cfg.att.type === 'bombards'
+      const hits = this.cfg.att.type === 'siege' || (this.cfg.att.type === 'bombards' || this.cfg.att.type === 'bombard')
         ? [tl.firstHit] : tl.fire.map(f => f + tl.flight);
       this.dDeaths.forEach((d, i) => { d.fallAt = hits[i % hits.length] + 2 + (i * 3) % 9; });
     } else spread(this.dDeaths, tl.contact + 10 * this.T, tl.fightEnd - 6 * this.T);
     if (counter) spread(this.aDeaths, tl.counterStart + 10 * this.T, tl.counterEnd - 4 * this.T);
     // strikes: front fighters swing in a staggered rhythm
     this.strikes = [];
-    const fighters = (list, n) => order(list).filter(a => !(a.type === 'siege' || a.type === 'bombards')).slice(0, n);
+    const fighters = (list, n) => order(list).filter(a => !(a.type === 'siege' || (a.type === 'bombards' || a.type === 'bombard'))).slice(0, n);
     if (!this.aRanged) {
       for (const a of fighters(A, 8)) {
         let f = tl.contact - 6 + Math.floor(this.r() * 12);
-        while (f < tl.fightEnd - 8) { this.strikes.push({ f, actor: a }); f += 22 + Math.floor(this.r() * 14); }
+        while (f < tl.fightEnd - 8) { this.strikes.push({ f, actor: a }); f += (HUGE.has(a.type) ? 34 : 22) + Math.floor(this.r() * 14); }
       }
     }
     if (counter && !this.dHolds) {
@@ -159,7 +161,7 @@ export class ClashScene {
   pose(a, alpha = 0) {
     const k = clamp((this.f + alpha - a.actF0) / a.actLen, 0, 1);
     return { act: a.flee ? 'flee' : a.dead ? 'fall' : a.act, k: a.dead ? clamp((this.f + alpha - a.deadF) / 50, 0, 1) : k,
-      walk: a.moving || a.flee ? a.walk : null, run: a.run || a.flee, t: (this.f + alpha) / 60 };
+      walk: a.moving || a.flee ? a.walk : null, run: a.run || a.flee, t: (this.f + alpha) / 60, v: a.v };
   }
 
   // Front-most living actor of a side, used to aim shots and place contact sparks.
@@ -209,14 +211,15 @@ export class ClashScene {
       if (s.f === f && !s.actor.dead && !s.actor.flee) {
         const a = s.actor;
         const act = a.type === 'spirit' ? 'swing' : attackAct(a.type) === 'draw' ? 'swing' : attackAct(a.type);
-        this.act(a, act, 26);
-        s.hitF = f + 12;
+        const slow = HUGE.has(a.type);
+        this.act(a, act, slow ? 40 : 26);
+        s.hitF = f + (slow ? 22 : 12);
       }
       if (s.hitF === f && !s.actor.dead) {
         const a = s.actor;
-        const x = a.x + a.facing * (MOUNTED.has(a.type) ? 30 : 18), y = a.y - (MOUNTED.has(a.type) ? 26 : 18);
-        this.emit({ k: 'clash', x, y, power: MOUNTED.has(a.type) || a.type === 'golem' ? 0.9 : 0.5, side: a.side });
-        if (f % 2 === 0) this.emit({ k: 'sfx', name: a.type === 'golem' ? 'hit' : 'clash', quiet: true });
+        const x = a.x + a.facing * (MOUNTED.has(a.type) || HUGE.has(a.type) ? 30 : 18), y = a.y - (MOUNTED.has(a.type) ? 26 : HUGE.has(a.type) ? 10 : 18);
+        this.emit({ k: 'clash', x, y, power: MOUNTED.has(a.type) || HUGE.has(a.type) ? 0.95 : 0.5, side: a.side, heavy: HUGE.has(a.type) });
+        if (f % 2 === 0 || HUGE.has(a.type)) this.emit({ k: 'sfx', name: HUGE.has(a.type) ? 'hit' : 'clash', quiet: !HUGE.has(a.type) });
         // the opponents in reach flinch/block
         for (const d of this.actors) if (d.side !== a.side && !d.dead && Math.abs(d.x - x) < 26 && d.act === 'idle' && !d.flee) this.act(d, 'block', 14);
       }
@@ -224,7 +227,7 @@ export class ClashScene {
     // ranged volleys
     if (this.aRanged) {
       const shooters = this.actors.filter(a => a.side === 'attacker' && !a.dead);
-      const engine = A.type === 'siege' || A.type === 'bombards';
+      const engine = A.type === 'siege' || (A.type === 'bombards' || A.type === 'bombard');
       for (const fireF of tl.fire) {
         const drawLen = engine ? (A.type === 'siege' ? 44 : 24) : POWDER.has(A.type) ? 20 : 26;
         if (f === fireF - Math.round(drawLen * (engine ? 0.4 : 1))) for (const s of shooters) this.act(s, engine ? 'loose' : 'draw', drawLen);
@@ -237,7 +240,7 @@ export class ClashScene {
             const flight = A.type === 'siege' ? 54 : tl.flight;
             this.shots.push({ kind: A.type === 'siege' ? 'stone' : 'ball', x0: from.x, y0: from.y, x1: tx, y1: ty - 6, f0: f, f1: f + flight, arc: A.type === 'siege' ? 64 : 14 });
             this.emit({ k: 'sfx', name: 'catapult' });
-            if (A.type === 'bombards') this.emit({ k: 'muzzle', x: from.x + 10, y: from.y, big: true });
+            if ((A.type === 'bombards' || A.type === 'bombard')) this.emit({ k: 'muzzle', x: from.x + 10, y: from.y, big: true });
           } else {
             const per = shooters.length < 5 ? 2 : 1;
             shooters.forEach((s, i) => {

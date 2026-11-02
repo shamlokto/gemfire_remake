@@ -13,7 +13,7 @@
 //   R.render(cg, W, H, alpha, open)            alpha: 0..1 between the last two steps
 
 import { SW, SH } from './choreo.js';
-import { palette, MOUNTED, POWDER } from './figures.js';
+import { palette, MOUNTED, POWDER, FLYING, HUGE } from './figures.js';
 import { blitFigure } from './figcache.js';
 import { drawSpirit } from './spirit-art.js';
 import { Particles, canvasOf, blob, hexRgb, mix, reducedMotion } from './fx.js';
@@ -82,7 +82,8 @@ export class ClashRenderer {
       case 'step': if (this.o.season === 3) P.snowPuff(e.x, e.y, 1); break;
       case 'clash':
         P.clash(e.x, e.y, e.power, e.side === 'attacker' ? [255, 215, 150] : [255, 190, 150]);
-        if (!red) this.shake = Math.min(8, this.shake + 1.5 * e.power);
+        if (e.heavy) { P.dust(e.x, e.y + 14, 6, [170, 150, 115], 0.45); P.ring(e.x, e.y + 12, 0.8, [230, 210, 170], 3); P.debris(e.x, e.y + 10, 5, [120, 100, 80], 3); }
+        if (!red) { this.shake = Math.min(e.heavy ? 12 : 8, this.shake + (e.heavy ? 5 : 1.5 * e.power)); if (e.heavy && !this.punch) this.punch = { x: e.x, y: e.y, t: 0, amt: 0.05 }; }
         break;
       case 'charge':
         P.clash(e.x, e.y, 1, [255, 220, 160]); P.dust(e.x, e.y + 8, 8, [175, 155, 120], 0.5); P.ring(e.x, e.y + 6, 1, [255, 230, 190], 3);
@@ -244,8 +245,8 @@ export class ClashRenderer {
       const x = ox + (a.px + (a.x - a.px) * alpha) * S, y = oy + a.y * S;
       const al = a.dead ? clamp(1 - (f - a.deadF) / 50, 0, 1) : 1;
       if (al <= 0 || (a.flee && (x < -60 || x > W2 + 60))) continue;
-      const r = (a.type === 'spirit' ? 34 : MOUNTED.has(a.type) || a.type === 'siege' || a.type === 'bombards' ? 22 : 12) * S;
-      const fly = a.type === 'wyvern' || (a.type === 'spirit' && (a.spirit === 'gale' || a.spirit === 'dusk'));
+      const r = (a.type === 'spirit' ? 34 : HUGE.has(a.type) ? 26 : MOUNTED.has(a.type) || a.type === 'siege' || (a.type === 'bombards' || a.type === 'bombard') ? 22 : 12) * S;
+      const fly = FLYING.has(a.type) || (a.type === 'spirit' && (a.spirit === 'gale' || a.spirit === 'dusk'));
       cg.globalAlpha = 0.35 * al * (fly ? 0.5 : 1);
       cg.drawImage(blob(0, 0, 0), x - r, y - r * 0.32, r * 2, r * 0.64);
     }

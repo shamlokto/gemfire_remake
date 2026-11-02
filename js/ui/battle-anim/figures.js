@@ -56,17 +56,27 @@ const KIT = {
   bandits:  { helm: 'cowl', weapon: 'crossbow', shield: null, armour: 'leather', mask: true },
   druids:   { helm: 'leafhood', weapon: 'staff', shield: null, armour: 'robe' },
   arquebusiers: { helm: 'kettle', weapon: 'gun', shield: null, armour: 'leather' },
+  lizardfolk: { helm: 'crest', weapon: 'pike', shield: 'round', armour: 'leather', skin: '#6aa04e', lizard: true, short: true },
+  skeletons:  { helm: 'nasal', weapon: 'sword', shield: 'round', armour: 'bones', skin: '#e8e2cc', skel: true },
 };
+// Sellswords mix their kit: a different helm, weapon and shield per figure.
+const SELL = [
+  { helm: 'kettle', weapon: 'sword', shield: 'round', armour: 'leather' },
+  { helm: 'cowl', weapon: 'axe', shield: null, armour: 'leather' },
+  { helm: 'nasal', weapon: 'axe', shield: 'round', armour: 'mail' },
+];
+export const FLYING = new Set(['wyvern', 'harpies']);
+export const HUGE = new Set(['giants', 'trolls', 'golem']);
 export const MOUNTED = new Set(['horse', 'knights', 'wolfriders', 'ghosts']);
-export const RANGED = new Set(['archers', 'bandits', 'druids', 'siege', 'arquebusiers', 'bombards']);
-export const POWDER = new Set(['arquebusiers', 'bombards']);
+export const RANGED = new Set(['archers', 'bandits', 'druids', 'siege', 'arquebusiers', 'bombards', 'bombard']);
+export const POWDER = new Set(['arquebusiers', 'bombards', 'bombard']);
 
 // Default attack act for a type.
 export function attackAct(type) {
-  if (type === 'pikes' || type === 'militia' || type === 'knights') return 'thrust';
+  if (type === 'pikes' || type === 'militia' || type === 'knights' || type === 'lizardfolk') return 'thrust';
   if (type === 'archers' || type === 'bandits') return 'draw';
   if (type === 'druids') return 'cast';
-  if (type === 'siege' || type === 'bombards') return 'loose';
+  if (type === 'siege' || (type === 'bombards' || type === 'bombard')) return 'loose';
   if (type === 'arquebusiers') return 'draw';
   return 'swing';
 }
@@ -133,10 +143,18 @@ function person(g, s, P, kit, pose, opts = {}) {
   const lean = (walking ? 0.06 * run : 0) + (act === 'swing' && k > 0.45 && k < 0.7 ? 0.12 : 0) + (act === 'thrust' && k > 0.35 && k < 0.6 ? 0.1 : 0);
   const hipY = -s * 0.46 + bob;
   const robe = kit.armour === 'robe';
+  if (kit.skin) P = { ...P, skin: kit.skin, skinD: kit.skin };
+  const rattle = kit.skel && walking ? Math.sin(ph * 3.7) * s * 0.012 : 0;
   g.save();
+  if (kit.lizard) {   // a heavy tail behind
+    g.strokeStyle = P.ink; g.lineWidth = s * 0.075; g.lineCap = 'round';
+    const tw = Math.sin(t * 3 + ph) * s * 0.04;
+    g.beginPath(); g.moveTo(-s * 0.05, hipY + s * 0.05); g.quadraticCurveTo(-s * 0.3, hipY + s * 0.2 + tw, -s * 0.42, hipY + s * 0.36); g.stroke();
+    g.strokeStyle = kit.skin; g.lineWidth = s * 0.05; g.stroke();
+  }
   // ---- legs
   if (!opts.mounted) {
-    const legCol = kit.armour === 'cloth' ? '#6a5a44' : kit.armour === 'leather' ? P.leatherD : '#3a3238';
+    const legCol = kit.skel ? '#e8e2cc' : kit.lizard ? '#5a8a44' : kit.armour === 'cloth' ? '#6a5a44' : kit.armour === 'leather' ? P.leatherD : '#3a3238';
     const swing = walking ? Math.sin(ph) * 0.55 * run : 0.12;
     const bendA = walking ? Math.max(0, Math.cos(ph)) * 0.7 : 0.05;
     const bendB = walking ? Math.max(0, -Math.cos(ph)) * 0.7 : 0.05;
@@ -149,13 +167,13 @@ function person(g, s, P, kit, pose, opts = {}) {
       for (const sx of [-1, 1]) { const off = walking ? Math.sin(ph) * s * 0.06 * sx : 0; g.beginPath(); g.ellipse(off + s * 0.03, -s * 0.01, s * 0.05, s * 0.025, 0, 0, TAU); g.fill(); }
     }
   }
-  g.translate(0, hipY);
+  g.translate(rattle, hipY);
   g.rotate(lean);
   // ---- back arm (behind body)
   const ap = armPose(kit.weapon, act, k, t);
   const shX = s * 0.03, shY = -s * 0.3;
   const AL = s * 0.27;
-  const sleeve = kit.armour === 'mail' ? P.steelD : kit.armour === 'leather' ? P.leather : kit.armour === 'robe' ? '#3f6a35' : '#8a7a5c';
+  const sleeve = kit.skel ? '#e8e2cc' : kit.lizard ? '#5a8a44' : kit.armour === 'mail' ? P.steelD : kit.armour === 'leather' ? P.leather : kit.armour === 'robe' ? '#3f6a35' : '#8a7a5c';
   {
     const ba = walking && act === 'idle' ? -Math.sin(ph) * 0.5 : ap.back;
     const hx = shX - s * 0.04 + Math.sin(ba) * AL, hy = shY + Math.cos(ba) * AL;
@@ -172,6 +190,13 @@ function person(g, s, P, kit, pose, opts = {}) {
     g.fillStyle = '#3f6a35'; g.strokeStyle = ink; g.lineWidth = 1.2;
     g.beginPath(); g.moveTo(-tw * 1.1, s * 0.46 - bob); g.lineTo(-tw * 0.8, -th2 + s * 0.02); g.lineTo(tw * 0.8, -th2 + s * 0.02); g.lineTo(tw * 1.25, s * 0.46 - bob); g.closePath(); g.fill(); g.stroke();
     g.fillStyle = P.col; g.fillRect(-tw * 0.9, -s * 0.02, tw * 1.9, s * 0.045);
+  } else if (kit.skel) {
+    g.strokeStyle = P.ink; g.lineWidth = 1;
+    g.fillStyle = '#3a3036'; g.fillRect(-tw * 0.7, -th2, tw * 1.4, th2 + s * 0.04);
+    g.strokeStyle = '#ece6d2'; g.lineWidth = Math.max(1, s * 0.03);
+    g.beginPath(); g.moveTo(0, -th2); g.lineTo(0, s * 0.03); g.stroke();
+    for (let i = 0; i < 4; i++) { const yy = -th2 + s * 0.05 + i * s * 0.065; g.beginPath(); g.moveTo(-tw * 0.75, yy + s * 0.02); g.quadraticCurveTo(0, yy - s * 0.02, tw * 0.75, yy + s * 0.02); g.stroke(); }
+    g.fillStyle = P.col; g.beginPath(); g.moveTo(-tw * 0.9, -s * 0.02); g.lineTo(tw * 0.9, -s * 0.04); g.lineTo(tw * 0.6, s * 0.12); g.lineTo(0, s * 0.06); g.lineTo(-tw * 0.7, s * 0.13); g.closePath(); g.fill();
   } else {
     // mail/leather undercoat
     g.fillStyle = kit.armour === 'mail' ? P.steelD : kit.armour === 'leather' ? P.leatherD : '#7a6a50';
@@ -193,8 +218,19 @@ function person(g, s, P, kit, pose, opts = {}) {
   const hy = -th2 - s * 0.1, hr = s * 0.085;
   g.fillStyle = P.skin; g.strokeStyle = ink; g.lineWidth = 1.1;
   g.beginPath(); g.arc(s * 0.01, hy, hr, 0, TAU); g.fill(); g.stroke();
-  g.fillStyle = ink; g.beginPath(); g.arc(s * 0.045, hy - hr * 0.1, Math.max(0.8, hr * 0.14), 0, TAU); g.fill();
-  drawHelm(g, kit.helm, s * 0.01, hy, hr, P, t, s);
+  if (kit.lizard) {   // snout and crest
+    g.fillStyle = P.skin; g.strokeStyle = ink; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(s * 0.04, hy - hr * 0.5); g.lineTo(s * 0.17, hy + hr * 0.05); g.lineTo(s * 0.05, hy + hr * 0.6); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = '#ffd34a'; g.beginPath(); g.arc(s * 0.05, hy - hr * 0.25, Math.max(0.9, hr * 0.18), 0, TAU); g.fill();
+    g.fillStyle = P.col; for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(-hr * 0.8 + i * hr * 0.5, hy - hr * 0.7); g.lineTo(-hr * 0.6 + i * hr * 0.5, hy - hr * 1.6); g.lineTo(-hr * 0.3 + i * hr * 0.5, hy - hr * 0.8); g.fill(); }
+  } else if (kit.skel) {
+    g.fillStyle = '#1a1418'; g.beginPath(); g.arc(s * 0.04, hy - hr * 0.05, hr * 0.25, 0, TAU); g.fill(); g.beginPath(); g.arc(s * 0.0, hy - hr * 0.05, hr * 0.2, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(160,255,200,0.9)'; g.beginPath(); g.arc(s * 0.04, hy - hr * 0.05, hr * 0.09, 0, TAU); g.fill();
+    drawHelm(g, kit.helm, s * 0.01, hy, hr, P, t, s);
+  } else {
+    g.fillStyle = ink; g.beginPath(); g.arc(s * 0.045, hy - hr * 0.1, Math.max(0.8, hr * 0.14), 0, TAU); g.fill();
+    drawHelm(g, kit.helm, s * 0.01, hy, hr, P, t, s);
+  }
   if (kit.mask) { g.fillStyle = '#2a2228'; g.fillRect(s * 0.0, hy + hr * 0.15, hr * 1.05, hr * 0.5); }
   // ---- shield (in front of the body)
   if (opts._shield) {
@@ -268,6 +304,16 @@ function drawWeapon(g, w, hx, hy, wa, s, P, act, k, ap, opts) {
       g.strokeStyle = 'rgba(255,245,220,0.55)'; g.lineWidth = Math.max(2, s * 0.06);
       g.beginPath(); g.arc(hx - dx * L * 0.2, hy - dy * L * 0.2, L * 1.05, wa - 1.4, wa); g.stroke(); g.restore();
     }
+  } else if (w === 'axe') {
+    const L = s * 0.32;
+    g.strokeStyle = ink; g.lineWidth = Math.max(2, s * 0.05);
+    g.beginPath(); g.moveTo(hx - dx * s * 0.05, hy - dy * s * 0.05); g.lineTo(hx + dx * L, hy + dy * L); g.stroke();
+    g.strokeStyle = P.wood; g.lineWidth = Math.max(1, s * 0.03); g.stroke();
+    const tx = hx + dx * L, ty = hy + dy * L, px2 = -dy, py2 = dx;
+    g.fillStyle = '#d6dae0'; g.strokeStyle = ink; g.lineWidth = 0.9;
+    g.beginPath(); g.moveTo(tx - dx * s * 0.02, ty - dy * s * 0.02); g.lineTo(tx + px2 * s * 0.1 - dx * s * 0.08, ty + py2 * s * 0.1 - dy * s * 0.08);
+    g.quadraticCurveTo(tx + px2 * s * 0.13 + dx * s * 0.02, ty + py2 * s * 0.13 + dy * s * 0.02, tx + px2 * s * 0.08 + dx * s * 0.08, ty + py2 * s * 0.08 + dy * s * 0.08); g.closePath(); g.fill(); g.stroke();
+    if (act === 'swing' && k > 0.43 && k < 0.66) { g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(255,245,220,0.5)'; g.lineWidth = Math.max(2, s * 0.06); g.beginPath(); g.arc(hx, hy, L * 1.05, wa - 1.4, wa); g.stroke(); g.restore(); }
   } else if (w === 'pike' || w === 'fork' || w === 'lance') {
     const back = w === 'pike' ? s * 0.45 : s * 0.25, L = w === 'pike' ? s * 0.95 : w === 'lance' ? s * 1.0 : s * 0.55;
     g.strokeStyle = ink; g.lineWidth = Math.max(2, s * 0.045);
@@ -467,6 +513,79 @@ function bombard(g, s, P, pose) {
   void t;
 }
 
+// A hunched brute (cave troll) or a towering one (hill giant), swinging a club.
+function brute(g, s, P, pose, giant) {
+  const ink = P.ink, t = pose.t || 0, act = pose.act, k = pose.k ?? 0;
+  const walking = pose.walk != null, ph = walking ? pose.walk * 0.55 : 0;
+  const S = s * (giant ? 1.85 : 1.5);
+  const skin = giant ? '#c49a74' : '#7d9076', skinD = giant ? '#8a6648' : '#4f6250';
+  const bob = walking ? -Math.abs(Math.sin(ph)) * S * 0.03 : Math.sin(t * 1.4) * S * 0.006;
+  let club = -0.6;   // club angle: raised back, smashes down-forward
+  if (act === 'swing' || act === 'thrust') club = k < 0.5 ? lerp(-0.6, -2.7, ease(k / 0.5)) : k < 0.65 ? lerp(-2.7, 0.9, easeOut((k - 0.5) / 0.15)) : lerp(0.9, -0.6, ease((k - 0.65) / 0.35));
+  // legs
+  for (const [x, o] of [[-0.08, 0], [0.08, Math.PI]]) {
+    const a = walking ? Math.sin(ph + o) * 0.35 : 0;
+    leg2(g, S * x, -S * 0.36 + bob, a, -0.15, S * 0.19, S * 0.085, o ? skin : skinD, ink, ink);
+  }
+  g.save(); g.translate(0, bob);
+  // body (hunched for the troll)
+  g.fillStyle = skin; g.strokeStyle = ink; g.lineWidth = 1.5;
+  g.beginPath(); g.ellipse(S * (giant ? 0 : 0.03), -S * 0.55, S * 0.2, S * 0.24, giant ? 0 : 0.25, 0, TAU); g.fill(); g.stroke();
+  // loincloth / hide in house colour
+  g.fillStyle = giant ? P.col : P.colD || P.col;
+  g.beginPath(); g.moveTo(-S * 0.17, -S * 0.42); g.lineTo(S * 0.17, -S * 0.42); g.lineTo(S * 0.13, -S * 0.3); g.lineTo(-S * 0.13, -S * 0.3); g.closePath(); g.fill(); g.stroke();
+  if (giant) { g.strokeStyle = P.leatherD; g.lineWidth = S * 0.025; g.beginPath(); g.moveTo(-S * 0.16, -S * 0.72); g.lineTo(S * 0.14, -S * 0.46); g.stroke(); }
+  // head
+  const hx = giant ? S * 0.02 : S * 0.15, hy = giant ? -S * 0.86 : -S * 0.72;
+  g.fillStyle = skin; g.strokeStyle = ink; g.lineWidth = 1.3;
+  g.beginPath(); g.ellipse(hx, hy, S * 0.08, S * 0.075, 0, 0, TAU); g.fill(); g.stroke();
+  if (!giant) { g.fillStyle = '#f0ead8'; g.beginPath(); g.moveTo(hx + S * 0.05, hy + S * 0.03); g.lineTo(hx + S * 0.06, hy - S * 0.01); g.lineTo(hx + S * 0.075, hy + S * 0.03); g.fill(); }
+  else { g.fillStyle = '#6a4a30'; g.beginPath(); g.ellipse(hx, hy + S * 0.05, S * 0.07, S * 0.04, 0, 0, Math.PI); g.fill(); }
+  g.fillStyle = giant ? '#1b1418' : '#ffcf4a'; g.beginPath(); g.arc(hx + S * 0.035, hy - S * 0.01, Math.max(1, S * 0.012), 0, TAU); g.fill();
+  // back arm
+  limb(g, -S * 0.12, -S * 0.66, -S * 0.2, -S * 0.42, S * 0.07, skinD, ink);
+  // club arm
+  const shx = S * 0.1, shy = giant ? -S * 0.72 : -S * 0.64;
+  const hx2 = shx + Math.cos(club + 1.2) * S * 0.24, hy2 = shy + Math.sin(club + 1.2) * S * 0.24;
+  const cdx = Math.cos(club), cdy = Math.sin(club), L = S * (giant ? 0.55 : 0.42);
+  g.strokeStyle = ink; g.lineWidth = S * 0.07; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(hx2 - cdx * S * 0.05, hy2 - cdy * S * 0.05); g.lineTo(hx2 + cdx * L, hy2 + cdy * L); g.stroke();
+  g.strokeStyle = giant ? '#6b4a2b' : '#5a5048'; g.lineWidth = S * 0.05; g.stroke();
+  g.fillStyle = giant ? '#5a3e24' : '#6a625a'; g.beginPath(); g.arc(hx2 + cdx * L, hy2 + cdy * L, S * (giant ? 0.07 : 0.06), 0, TAU); g.fill();
+  limb(g, shx, shy, hx2, hy2, S * 0.075, skin, ink);
+  g.restore();
+}
+
+function harpy(g, s0, P, pose) {
+  const s = s0 * 1.35;
+  const ink = P.ink, t = pose.t || 0, act = pose.act, k = pose.k ?? 0;
+  const flap = Math.sin(t * 9 + (pose.walk || 0));
+  let dive = 0;
+  if (act === 'swing' || act === 'thrust') dive = Math.sin(clamp(k, 0, 1) * Math.PI);
+  g.translate(dive * s * 0.3, -s * 0.85 + Math.sin(t * 3) * s * 0.05 + dive * s * 0.45);
+  g.rotate(dive * 0.5);
+  const feath = '#6a5a7a', feathL = '#a898b8';
+  const wing = (back) => {
+    g.save(); g.fillStyle = back ? '#4a3e58' : feath; g.strokeStyle = ink; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, -s * 0.05);
+    g.lineTo(-s * 0.3, -s * (0.3 + flap * 0.28) * (back ? 0.8 : 1)); g.lineTo(-s * 0.55, -s * (0.15 + flap * 0.3) * (back ? 0.8 : 1));
+    for (let i = 0; i < 4; i++) g.lineTo(-s * (0.5 - i * 0.12), -s * (0.02 + flap * 0.1) + s * 0.05 * (i % 2));
+    g.closePath(); g.fill(); g.stroke(); g.restore();
+  };
+  wing(true);
+  // body and legs with talons
+  g.fillStyle = feathL; g.strokeStyle = ink; g.lineWidth = 1.1;
+  g.beginPath(); g.ellipse(0, 0, s * 0.09, s * 0.16, 0.2, 0, TAU); g.fill(); g.stroke();
+  g.strokeStyle = '#d8b040'; g.lineWidth = Math.max(1, s * 0.03);
+  for (const x of [-0.02, 0.04]) { g.beginPath(); g.moveTo(s * x, s * 0.13); g.lineTo(s * (x + 0.04 + dive * 0.08), s * (0.26 + dive * 0.04)); g.stroke(); }
+  g.fillStyle = P.col; g.fillRect(-s * 0.07, -s * 0.02, s * 0.14, s * 0.05);   // sash
+  // head with wild hair
+  g.fillStyle = '#d8b090'; g.beginPath(); g.arc(s * 0.05, -s * 0.2, s * 0.06, 0, TAU); g.fill(); g.stroke();
+  g.fillStyle = '#3a2a40'; g.beginPath(); g.moveTo(s * 0.0, -s * 0.25); g.quadraticCurveTo(-s * 0.15, -s * 0.28 - flap * s * 0.03, -s * 0.18, -s * 0.12); g.lineTo(s * 0.02, -s * 0.18); g.fill();
+  g.fillStyle = '#ff5a5a'; g.beginPath(); g.arc(s * 0.075, -s * 0.21, Math.max(0.8, s * 0.012), 0, TAU); g.fill();
+  wing(false);
+}
+
 function golem(g, s, P, pose) {
   const ink = P.ink, t = pose.t || 0, act = pose.act, k = pose.k ?? 0;
   const walking = pose.walk != null, ph = walking ? pose.walk * 0.7 : 0;
@@ -564,7 +683,11 @@ export function drawSoldier(g, type, x, y, s, P, facing, pose = {}) {
       break;
     }
     case 'siege': catapult(g, s, P, p2); break;
-    case 'bombards': bombard(g, s, P, p2); break;
+    case 'trolls': brute(g, s, P, p2, false); break;
+    case 'giants': brute(g, s, P, p2, true); break;
+    case 'harpies': harpy(g, s, P, p2); break;
+    case 'sellswords': person(g, s, P, SELL[(pose.v || 0) % 3], p2); break;
+    case 'bombards': case 'bombard': bombard(g, s, P, p2); break;
     case 'golem': golem(g, s, P, p2); break;
     case 'wyvern': wyvern(g, s, P, p2); break;
     default: person(g, s, P, KIT[type] || KIT.footmen, p2);
@@ -575,7 +698,7 @@ export function drawSoldier(g, type, x, y, s, P, facing, pose = {}) {
 // Where a figure's weapon/launch point roughly is (for arrows and spells), relative to feet.
 export function launchPoint(type, s, facing) {
   if (type === 'siege') return { x: facing * s * 0.3, y: -s * 1.1 };
-  if (type === 'bombards') return { x: facing * s * 0.38, y: -s * 0.38 };
+  if ((type === 'bombards' || type === 'bombard')) return { x: facing * s * 0.38, y: -s * 0.38 };
   if (type === 'arquebusiers') return { x: facing * s * 0.62, y: -s * 0.72 };
   if (MOUNTED.has(type)) return { x: facing * s * 0.35, y: -s * 1.05 };
   return { x: facing * s * 0.22, y: -s * 0.68 };
@@ -583,7 +706,7 @@ export function launchPoint(type, s, facing) {
 
 // Figures per unit by strength and type.
 export function squadSize(type) {
-  return { golem: 1, wyvern: 1, siege: 2, bombards: 2, horse: 4, knights: 3, wolfriders: 4, ghosts: 3 }[type] || 6;
+  return { golem: 1, wyvern: 1, giants: 1, trolls: 2, harpies: 3, siege: 2, bombards: 2, bombard: 2, horse: 4, knights: 3, wolfriders: 4, ghosts: 3 }[type] || 6;
 }
 // Formation slots (cell units, x forward, y depth), front rank first.
 const FORMS = {

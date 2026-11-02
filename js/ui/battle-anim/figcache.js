@@ -16,7 +16,7 @@ function poseKey(pose) {
   const walk = pose.walk == null ? 'n' : q(((pose.walk % TAU) + TAU) % TAU / TAU, 12);
   const k = q(pose.k ?? 0, 24);
   const t = q(((pose.t || 0) % 3) / 3, 6);
-  return `${pose.act || 'idle'}:${k}:${walk}:${t}:${pose.run ? 1 : 0}`;
+  return `${pose.act || 'idle'}:${k}:${walk}:${t}:${pose.run ? 1 : 0}:${pose.v || 0}`;
 }
 
 // Returns { c: canvas, ax, ay, sc } — draw with g.drawImage(c, x - ax / sc, y - ay / sc, c.width / sc, c.height / sc)
