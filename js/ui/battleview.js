@@ -635,7 +635,7 @@ export async function runBattle(container, input, opts = {}) {
   function drawIsoSprite(u, d, cx, cy, img, t, done) {
     const { cs } = view;
     const bb = opaqueBox(img);
-    const big = isDragon(u) ? 2.5 : isSpirit(u) ? 1.55 : MOUNTED.has(u.type) || HUGE.has(u.type) || u.type === 'siege' || u.type === 'bombard' ? 1.25 : 1.05;
+    const big = isDragon(u) ? 3.4 : isSpirit(u) ? 2.1 : MOUNTED.has(u.type) || HUGE.has(u.type) || u.type === 'siege' || u.type === 'bombard' ? 1.85 : 1.6;
     const n = isoCopies(u, d);
     // dying copies: remember the count and fade the dropped ones out
     if (d.isoN == null) d.isoN = n;

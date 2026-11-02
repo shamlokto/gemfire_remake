@@ -155,12 +155,19 @@ export class IsoBoard {
     const p = this.pt(x, y, z);
     const drop = (z + BASE) * this.zh;
     const top = (TOP[t] || TOP.grass)[s] || '#666';
-    const side = SIDE[t] || shade(top, -0.45);
-    // left and right faces down to the base
-    g.fillStyle = shade(side, -0.05);
+    const side = SIDE[t] || (s === 3 ? '#8f989e' : '#6b5a43');   // earth under the turf
+    // left and right faces down to the base (a band of turf at the top, then earth)
+    g.fillStyle = shade(side, 0.05);
     g.beginPath(); g.moveTo(p.x - a, p.y); g.lineTo(p.x, p.y + hh); g.lineTo(p.x, p.y + hh + drop); g.lineTo(p.x - a, p.y + drop); g.closePath(); g.fill();
-    g.fillStyle = shade(side, -0.25);
+    g.fillStyle = shade(side, -0.22);
     g.beginPath(); g.moveTo(p.x + a, p.y); g.lineTo(p.x, p.y + hh); g.lineTo(p.x, p.y + hh + drop); g.lineTo(p.x + a, p.y + drop); g.closePath(); g.fill();
+    if (!SIDE[t]) {
+      const band = Math.min(drop, this.zh * 0.35);
+      g.fillStyle = shade(top, -0.18);
+      g.beginPath(); g.moveTo(p.x - a, p.y); g.lineTo(p.x, p.y + hh); g.lineTo(p.x, p.y + hh + band); g.lineTo(p.x - a, p.y + band); g.closePath(); g.fill();
+      g.fillStyle = shade(top, -0.35);
+      g.beginPath(); g.moveTo(p.x + a, p.y); g.lineTo(p.x, p.y + hh); g.lineTo(p.x, p.y + hh + band); g.lineTo(p.x + a, p.y + band); g.closePath(); g.fill();
+    }
     // strata lines on tall columns
     if (z >= 1) {
       g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1;
@@ -175,15 +182,18 @@ export class IsoBoard {
     g.fillStyle = top; g.fillRect(p.x - a, p.y - hh, a * 2, a);
     const texKey = TEX[t];
     const img = texKey && this.ISO_TERRAIN && this.artImg(this.ISO_TERRAIN[texKey]);
-    if (img && t !== 'ice' || (img && t === 'ice')) {
+    this.texture(g, t, p, x, y, s);
+    if (img) {
+      // a random patch of the painted tile's top face, blended over the base colour (avoids a
+      // repeating checker pattern across the field)
       const bb = opaqueBox(img);
-      const k = (a * 2) / bb.w;
-      // map the painted tile's top face (its upper part) onto ours
-      g.globalAlpha = s === 3 && t !== 'snow' && t !== 'water' && t !== 'ice' ? 0.55 : 0.92;
-      g.drawImage(img, bb.x, bb.y, bb.w, bb.w / 2, p.x - a, p.y - hh, a * 2, a);
+      const sw = bb.w * 0.5, sh = sw / 2;
+      const sx = bb.x + bb.w * 0.25 + (hash(x, y, 11) - 0.5) * bb.w * 0.2, sy = bb.y + bb.w * 0.25 - sh / 2 + (hash(x, y, 12) - 0.5) * bb.w * 0.08;
+      g.globalAlpha = (t === 'water' || t === 'lava' || t === 'ice' || t === 'sand' || t === 'snow' || t === 'marsh' || t === 'farmland' || t === 'road') ? 0.6 : 0.32;
+      if (s === 3 && !['snow', 'water', 'ice'].includes(t)) g.globalAlpha *= 0.6;
+      g.drawImage(img, sx, sy, sw, sh, p.x - a, p.y - hh, a * 2, a);
       g.globalAlpha = 1;
-      void k;
-    } else this.texture(g, t, p, x, y, s);
+    }
     if (s === 3 && !['water', 'ice', 'snow', 'lava', 'bridge', 'sand'].includes(t)) { g.fillStyle = 'rgba(240,245,250,0.32)'; g.fillRect(p.x - a, p.y - hh, a * 2, a); }
     if (s === 2) { g.fillStyle = 'rgba(200,120,30,0.07)'; g.fillRect(p.x - a, p.y - hh, a * 2, a); }
     // light from the upper left
