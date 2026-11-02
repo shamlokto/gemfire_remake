@@ -40,6 +40,14 @@ SECTION = {
     'W': ('Small wide painting of the place.', '16:9'),     # island provinces 231-234
     'X': (PORTRAIT, '3:4'),                                   # wanderers and heirs 235-270
     'Y': (CUTIN, '21:9'),                                     # clash cut-ins for new companies 271-278
+    # Land and battle set 279-378
+    'Z1': ('Isometric game building sprite, 2:1 isometric angle, one building on a single diamond tile of grass, centred, small margin, plain flat pale grey background.', '1:1'),
+    'Z2': ('Isometric game tile sprite, 2:1 isometric angle, a single diamond tile, centred, small margin, plain flat pale grey background.', '1:1'),
+    'Z3': ('Wide painted landscape seen from a hill, soft and slightly hazy, no figures.', '21:9'),
+    'Z4': (WIDE, '16:9'),
+    'Z5': ('Wide painted battlefield landscape, low horizon, empty of soldiers, dramatic sky.', '21:9'),
+    'Z6': ('Wide cinematic battle painting, dynamic, dramatic lighting.', '21:9'),
+    'Z7': (FX, '1:1'),
 }
 SLOT_ASPECT = {3: '1:1', 4: '5:2', 5: '5:2', 6: '5:2', 7: '5:2', 12: '1:1', 13: '1:1', 14: '1:1', 15: '1:1'}
 SLOT_EXTRA = {
@@ -54,7 +62,7 @@ def parse():
     for f in ('docs/SHOTLIST.md', 'docs/SHOTLIST-EXTRA.md'):
         for raw in open(os.path.join(ROOT, f), encoding='utf-8'):
             line = raw.strip()
-            m = re.match(r'^\*\*([A-Z])\. (.+?)\*\*', line)
+            m = re.match(r'^\*\*([A-Z][0-9]?)\. (.+?)\*\*', line)
             if m:
                 cur = m.group(1)
                 house = None

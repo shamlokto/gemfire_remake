@@ -156,3 +156,53 @@ the left and keep the right third darker (the defender's portrait and numbers go
 273 Harpies diving out of a stormy sky with talons out 274 Lizardfolk warriors bursting out of marsh water with spears
 275 A skeleton legion marching in tight ranks through mist 276 Hill giants hurling boulders at a castle wall
 277 Arquebusiers firing a volley in a cloud of white smoke 278 A bombard cannon firing with a great flash and recoil
+
+## Land and battle set (slots 279-378)
+
+The land view (SimCity panel) and the battles get the next 100 images. Isometric sprites are
+drawn on the land board in place of the procedural buildings; they must read at small size.
+
+**Z1. Land buildings (18)**: isometric game building sprite, 2:1 isometric angle, one building on a single diamond tile of grass, centred, plain flat pale grey background
+279 Farm plot with ploughed furrows and a small barn 280 Windmill with a stone base 281 Fruit orchard with rows of trees
+282 Vineyard on a terraced slope with a press house 283 Horse pasture with a wooden fence and stable 284 Lumber camp with log piles and a sawpit
+285 Mine entrance in a rocky hillside with a cart and rails 286 Stone quarry with cut blocks and a crane 287 Fishery with drying racks and a small jetty
+288 Harbour with a stone quay and a moored sailing ship 289 Cluster of timber-framed village houses 290 Market square with striped stalls and a well
+291 Granary with a raised stone floor and thatched roof 292 Small temple with columns and a glowing lantern 293 Barracks with a training yard and weapon racks
+294 Stone wall section with a tower 295 Castle keep with banners 296 Burnt-out ruined farmhouse, smoke rising
+
+**Z2. Land resources (6)**: isometric game tile sprite, 2:1 isometric angle, a single diamond tile, centred, plain flat pale grey background
+297 Rich ore vein glittering in grey rock 298 White salt flats with raked pans 299 Pearl oyster beds in shallow turquoise water
+300 Overgrown ancient ruins with broken columns 301 Sacred grove of white trees with floating motes 302 Steaming hot springs in red rock
+
+**Z3. Land panoramas (10)**: wide painted landscape seen from a hill, soft and slightly hazy, no figures, used behind the land board
+303 Fertile river plains with golden fields 304 Deep green forest valley 305 Rolling highland hills with heather 306 Snowy mountain range
+307 Misty marshland with reeds 308 Sunny sea coast with cliffs 309 Spring sky with blossoms drifting 310 Summer sky with tall white clouds
+311 Autumn sky with geese flying south 312 Winter sky with falling snow over a frozen landscape
+
+**Z4. Land moments (8)**: wide cinematic
+313 A harvest festival among sheaves in golden fields 314 Builders raising a timber frame with ropes and scaffolding
+315 Raiders burning farms at dusk 316 A looted town with soldiers carrying off sacks 317 A flourishing breadbasket valley seen from above
+318 A barren mountain village in winter 319 Labourers draining a marsh with ditches 320 Woodcutters clearing a forest
+
+**Z5. Battle backdrops (24)**: wide painted battlefield landscape, low horizon, empty of soldiers, dramatic sky, used behind animated soldiers
+321 Grassy plains at noon 322 Plains at dusk with a red sky 323 Plains in snow 324 Forest edge in summer 325 Forest in autumn colours
+326 Forest in winter snow 327 Highland hills at noon 328 Hills at dusk 329 Hills in snow 330 Marsh in fog 331 Marsh at dusk
+332 Sea coast on a sunny day 333 Sea coast in a storm 334 Mountain pass at noon 335 Mountain pass in snow
+336 Castle walls by day, seen from the field 337 Castle walls at night under torches 338 Castle walls burning
+339 River with a stone bridge 340 Ancient ruins on a plain 341 Volcanic island with smoking rocks 342 Rainy plains under dark clouds
+343 Spring meadow with flowers 344 Sunrise over misty hills
+
+**Z6. Battle moments (24)**: wide cinematic battle painting
+345 A shield wall holding against a charge 346 Cavalry striking an army's flank 347 Archers on castle walls shooting down
+348 Defenders pouring boiling oil from a gatehouse 349 A sally of knights bursting out of a castle gate 350 A general rallying wavering troops with a raised banner
+351 An army retreating across a river ford 352 Soldiers cheering around a captured banner 353 Two spirits clashing in the sky above armies
+354 A golem smashing a castle gate 355 Arquebusiers firing from behind wooden stakes 356 A bombard cannon firing at a castle wall
+357 Harpies diving at archers 358 Lizardfolk ambushing from a swamp 359 Hill giants hurling boulders 360 A skeleton legion marching through mist
+361 Aldmere knights in blue and silver charging 362 Corvane raven-masked riders in black and violet at night 363 Isolde marines in teal and white storming a beach
+364 Hrothgar clansmen in brown and amber charging downhill 365 Seraphine templars in white and gold advancing in sunlight 366 Vey archers in green and bronze shooting from reeds
+367 A battlefield at dawn after the fighting, banners in the mud 368 A messenger galloping with news of victory
+
+**Z7. Battle effects (10)**: one effect only, on a pure black background, nothing else in the frame
+369 Fiery explosion burst with debris 370 Billowing white gunpowder smoke cloud 371 Rolling brown dust cloud 372 Shower of bright sparks
+373 Glowing magic sigil circle in orange fire 374 Glowing magic sigil circle in blue water 375 Glowing magic sigil circle in white lightning
+376 Glowing magic sigil circle in brown stone 377 Glowing magic sigil circle in violet shadow 378 Expanding golden shockwave ring

@@ -48,7 +48,41 @@ export const SLOTS = [
   ...S(235, 270, 'portrait', 512, 640, 'cover'),
   // Clash cut-ins for the companies added with the tech tree
   ...S(271, 278, 'cutin', 1600, 700, 'cover'),
+  // Land and battle set (docs/SHOTLIST-EXTRA.md Z1-Z7)
+  ...S(279, 302, 'isosprite', 384, 384, 'cutout'),
+  ...S(303, 312, 'backdrop', 1600, 700, 'cover'),
+  ...S(313, 320, 'scene', 1600, 900, 'cover'),
+  ...S(321, 344, 'backdrop', 1600, 700, 'cover'),
+  ...S(345, 368, 'cutin', 1600, 700, 'cover'),
+  ...S(369, 378, 'fx', 512, 512, 'fx'),
 ];
+
+// Land view art (Z1-Z4).
+export const LAND_BUILDING = { farm: 279, mill: 280, orchard: 281, vineyard: 282, pasture: 283, lumber: 284,
+  mine: 285, quarry: 286, fishery: 287, harbour: 288, houses: 289, market: 290, granary: 291, temple: 292,
+  barracks: 293, walls: 294, keep: 295, ruin: 296 };
+export const LAND_RESOURCE = { ore: 297, salt: 298, pearls: 299, ruins: 300, grove: 301, springs: 302 };
+export const LAND_PANORAMA = { plains: 303, forest: 304, hills: 305, mountain: 306, marsh: 307, coast: 308 };
+export const LAND_SKY = [309, 310, 311, 312];          // spring, summer, autumn, winter
+export const LAND_MOMENT = { harvest: 313, building: 314, raid: 315, loot: 316, breadbasket: 317,
+  barren: 318, drain: 319, clear: 320 };
+// Battle backdrops by terrain and weather (Z5); battle moments (Z6); effects (Z7).
+export const CLASH_BACKDROP = {
+  plains: { day: 321, dusk: 322, snow: 323, rain: 342, spring: 343 },
+  forest: { day: 324, autumn: 325, snow: 326 },
+  hills: { day: 327, dusk: 328, snow: 329, dawn: 344 },
+  marsh: { fog: 330, dusk: 331 },
+  coast: { day: 332, storm: 333 },
+  mountain: { day: 334, snow: 335 },
+  siege: { day: 336, night: 337, burning: 338 },
+  river: { day: 339 }, ruins: { day: 340 }, volcanic: { day: 341 },
+};
+export const BATTLE_MOMENT2 = { shieldWall: 345, flank: 346, wallArchers: 347, boilingOil: 348, sally: 349,
+  rally: 350, retreat: 351, banner: 352, spiritClash: 353, golemGate: 354, arquebusStakes: 355, bombardWall: 356,
+  harpyDive: 357, lizardAmbush: 358, giantBoulders: 359, skeletonMist: 360, aftermath: 367, messenger: 368 };
+export const HOUSE_CHARGE = { aldmere: 361, corvane: 362, isolde: 363, hrothgar: 364, seraphine: 365, vey: 366 };
+export const FX_ART = { explosion: 369, smoke: 370, dust: 371, sparks: 372, shockwave: 378 };
+export const SPIRIT_SIGIL = { ember: 373, tide: 374, gale: 375, stone: 376, dusk: 377 };
 
 // Battle set lookups.
 export const CLASH_CUTIN = { footmen: 201, pikes: 202, archers: 203, horse: 204, knights: 205,
