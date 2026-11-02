@@ -1,3 +1,6 @@
+import { PROVINCES } from './world.js';
+const PROVINCE_NAMES = PROVINCES.map(p => p.name);
+
 // Art slots 1-100 (see docs/SHOTLIST.md). Each slot: id, kind, target size (w x h) after
 // processing, and how tools/process_art.py treats it:
 //   cover   = centre-crop to aspect, resize
@@ -39,6 +42,8 @@ export const SLOTS = [
   ...S(201, 225, 'cutin', 1600, 700, 'cover'),
   ...S(226, 228, 'fx', 1024, 1024, 'fx'),
   ...S(229, 230, 'ui', 1024, 1024, 'cutout'),
+  // Vignettes for the four island provinces added with the 28-province map
+  ...S(231, 234, 'vignette', 800, 450, 'cover'),
 ];
 
 // Battle set lookups.
@@ -55,7 +60,16 @@ export const BATTLE_FRAME = 229, BATTLE_EMBLEM = 230;
 export const HOUSE_ORDER = ['aldmere', 'corvane', 'isolde', 'hrothgar', 'seraphine', 'vey'];
 export const CREST = Object.fromEntries(HOUSE_ORDER.map((h, i) => [h, 101 + i]));
 export const ENDING = Object.fromEntries(HOUSE_ORDER.map((h, i) => [h, 185 + i]));
-export const PROVINCE_VIGNETTE = id => 113 + id;
+// Vignette slot by province name (slots 113-136 follow the shot list's order; 231-234 are the
+// island provinces added later).
+const VIGNETTE_BY_NAME = {
+  Frosthelm: 113, Ravenscar: 114, Greywatch: 115, Coldmere: 116, Ironpeak: 117, Skerry: 118,
+  Highcairn: 119, Thornwood: 120, Aldford: 121, Kingsrest: 122, Saltmarch: 123, Gullhaven: 124,
+  Bramblefell: 125, Oakhollow: 126, Lanterncross: 127, Millbrook: 128, Amberfield: 129, Pearlcoast: 130,
+  Mirefen: 131, Reedwater: 132, Fenwick: 133, Sunspire: 134, Goldvale: 135, Tidesend: 136,
+  Westreach: 231, Cairnholm: 232, Sunderisle: 233, Emberrock: 234,
+};
+export const PROVINCE_VIGNETTE = id => VIGNETTE_BY_NAME[PROVINCE_NAMES[id]] ?? 113;
 export const BATTLE_BACKDROP = { plains: 107, coast: 107, forest: 108, hills: 109, mountain: 109, marsh: 110 };
 export const SEASON_MAP = [111, 10, 112, 11];         // spring, summer, autumn, winter
 // Troop sprite in house colours (fallback: neutral sprite from units.js, tinted).

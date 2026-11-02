@@ -10,27 +10,27 @@ export const HOUSES = [
   },
   {
     id: 'corvane', name: 'House Corvane', short: 'Corvane', color: '#3a3346', accent: '#b9a7d9',
-    motto: 'We see all from the high crag.', ruler: 'corvane_0', capital: 1, provinces: [1, 2],
+    motto: 'We see all from the high crag.', ruler: 'corvane_0', capital: 2, provinces: [2, 3],
     shard: 'dusk', blurb: 'Northern ravens: poor land, cunning vassals, strong spies.',
   },
   {
     id: 'isolde', name: 'House Isolde', short: 'Isolde', color: '#178f8a', accent: '#a9efe8',
-    motto: 'Every tide brings coin.', ruler: 'isolde_0', capital: 11, provinces: [11, 17],
+    motto: 'Every tide brings coin.', ruler: 'isolde_0', capital: 21, provinces: [21, 22],
     shard: 'gale', blurb: 'Merchant coast: deep coffers, fine companies for hire.',
   },
   {
     id: 'hrothgar', name: 'Clan Hrothgar', short: 'Hrothgar', color: '#8a5a2b', accent: '#f0c890',
-    motto: 'Stone does not kneel.', ruler: 'hrothgar_0', capital: 12, provinces: [12, 6],
+    motto: 'Stone does not kneel.', ruler: 'hrothgar_0', capital: 11, provinces: [11, 6],
     shard: 'stone', blurb: 'Highland clans: hardy fighters, few farms.',
   },
   {
     id: 'seraphine', name: 'Order of Seraphine', short: 'Seraphine', color: '#d8b84a',
-    accent: '#fff4c8', motto: 'Light before the dark.', ruler: 'seraphine_0', capital: 21,
-    provinces: [21, 22], shard: 'ember', blurb: 'Temple order of the south: loyal people, zealous knights.',
+    accent: '#fff4c8', motto: 'Light before the dark.', ruler: 'seraphine_0', capital: 19,
+    provinces: [19, 20], shard: 'ember', blurb: 'Temple order of the south: loyal people, zealous knights.',
   },
   {
     id: 'vey', name: 'Vey Marsh League', short: 'Vey', color: '#4f8f3a', accent: '#cdeeb0',
-    motto: 'The reeds bend; they do not break.', ruler: 'vey_0', capital: 19, provinces: [19, 18],
+    motto: 'The reeds bend; they do not break.', ruler: 'vey_0', capital: 17, provinces: [17, 16],
     shard: null, blurb: 'Marsh folk with no shard of their own: they must win one.',
   },
 ];

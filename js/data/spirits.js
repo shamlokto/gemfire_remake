@@ -19,4 +19,13 @@ export const SPIRITS = {
            spell: 'Bewilder', shape: 'area', radius: 2, confuse: 2,
            text: 'Enemy units in a 5x5 area are confused for two rounds: they stand still or strike their own side.' },
 };
+// A summoned spirit takes an army's 5th slot and fights on the board as a unit. `soldiers` is its
+// essence: it is banished (routs) like any unit. It casts its spell once per battle.
+export const SPIRIT_UNIT = {
+  ember: { atk: 20, def: 14, move: 5, range: 1, soldiers: 120 },
+  tide:  { atk: 15, def: 18, move: 4, range: 2, soldiers: 140 },
+  gale:  { atk: 16, def: 12, move: 7, range: 3, soldiers: 100, flying: true },
+  stone: { atk: 18, def: 24, move: 2, range: 1, soldiers: 160 },
+  dusk:  { atk: 14, def: 14, move: 6, range: 2, soldiers: 110, flying: true },
+};
 export const SPIRIT_IDS = Object.keys(SPIRITS);

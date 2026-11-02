@@ -40,3 +40,6 @@ export const MILITIA = { name: 'Militia', atk: 6, def: 8, move: 3, range: 1, spr
 
 export const MAX_SOLDIERS = 500;      // per vassal unit
 export const MAX_VASSALS_PER_PROVINCE = 5;
+export const MAX_UNITS_PER_PROVINCE = 8;
+export const MAX_UNITS_PER_ARMY = 4;   // plus the 5th slot (company or spirit)
+export const ROUT_LED = 0.30, ROUT_LEADERLESS = 0.40;

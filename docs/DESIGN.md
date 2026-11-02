@@ -134,3 +134,52 @@ BattleResult = {
 * The keep centre (13,5) is the objective even in field battles; first attacker on the gate (12,5)
   raises a gate-breach event. Last Stand moment fires when a ruler's unit drops below 45%.
 * `autoResolve(input, seed)` takes a numeric seed. Realm harvest is fields x 10.
+
+## v2: islands map and the army model (supersedes earlier sections where they differ)
+
+### Map
+28 provinces (`js/data/world.js`): mainland, the Vey marsh peninsula (Mirefen - Reedwater -
+Fenwick, joined to the mainland only at Lanterncross), and islands joined by single sea lanes
+(`SEA_LANES`: Skerry-Ravenscar, Saltmarch-Gullhaven, Highcairn-Westreach causeway,
+Goldvale-Sunderisle). Dead ends: Frosthelm, Mirefen, Cairnholm, Emberrock, Tidesend.
+Victory: `VICTORY_PROVINCES` = 20 provinces, or all 5 shards. Each province has a `region`
+(landmass) for drawing. Capitals: Aldmere 8, Corvane 2, Isolde 21, Hrothgar 11, Seraphine 19, Vey 17.
+
+### Troop units are separate from vassals
+* A province garrisons **troop units**: `province.units = [{ uid, type, soldiers, training, leader }]`,
+  at most `MAX_UNITS_PER_PROVINCE` = 8. `type` is a TROOPS key; `soldiers` <= `MAX_SOLDIERS` (500);
+  `leader` is a vassal id or null. `uid` is a unique string ("u17"); `state.nextUid` counts.
+* Vassals no longer carry soldiers (`troop`, `soldiers`, `training` are removed from RealmState
+  vassals). A vassal leads at most one unit (`unit.leader`), must be in the same province, and may
+  lead none. At the start each vassal leads one unit built from its `troop`/`soldiers` in
+  `vassals.js`; each house also gets 2 leaderless footmen units of 80 in its capital.
+* A unit with a leader adds the leader's Might (attack/defence) and Wits (ranged, spells) in
+  battle; a leaderless unit fights with might = wits = 0 and routs earlier (below 40% instead of 30%).
+* Orders change accordingly:
+  - `muster` {province, type, soldiers, unit?}: adds soldiers to an existing unit (`unit` uid) or
+    raises a new unit of `type` (if under the unit cap). Cost as before.
+  - `train` {province, unit?}: trains one unit, or all units in the province if none given.
+  - `assign` {province, unit, vassal|null} is a **free action** (does not use the province's order):
+    exported as `assignLeader(state, pid, uid, vid)`; it unassigns that vassal from any other unit.
+  - `march` {from, to, units: [uid] (max 4), vassals: [vid], fifth: 'company'|'spirit'|null, food}:
+    an attack needs at least one vassal; units keep their leaders; a vassal leading a unit must
+    march with it. Transfers to own provinces respect the unit cap.
+  - `disband` {province, unit} frees a unit's soldiers into loyalty +2 (optional nicety).
+* Upkeep counts province units (and marching units).
+
+### Battles: 4 units + the 5th slot
+* Each side brings up to **4 troop units** plus a **5th slot**: the province's hired company, or
+  the house's **summoned spirit** (if the house holds a shard, has not used that spirit this season,
+  and at least one vassal is present). The attacker chooses the 5th in the march order; the
+  defender uses its company if any, else its spirit if available (AI/UI may prefer the spirit).
+  Defenders with more than 4 units field the 4 strongest; the rest wait and are captured/lost
+  only if the province falls (they retreat with the surviving vassals if possible).
+* `UnitIn = { id, kind: 'troop'|'company'|'spirit'|'militia', type, soldiers, training,
+  leader: vassalId|null, might, wits }` (might/wits are the leader's, 0 if none; for a spirit
+  `type` is the spirit id and stats come from `SPIRIT_UNIT` in spirits.js). `BattleInput.attacker/
+  defender.spirit` is replaced by the spirit unit inside `units`. The spirit unit casts its spell
+  once (the `spell` action names the unit), and when banished it leaves the field. Results report
+  every unit by id as before.
+* Free holds defend with 1-3 leaderless militia units.
+* After the battle, losers' vassals with no surviving unit can be captured even if a retreat
+  exists (40% each), so leaders matter.

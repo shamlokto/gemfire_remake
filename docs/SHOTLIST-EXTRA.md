@@ -106,3 +106,10 @@ the left and keep the right third darker (the defender's portrait and numbers go
 **V. Battle UI (2)**
 229 Ornate gold-and-iron battle frame border, empty centre, flat pale grey background
 230 War drum and crossed banners emblem, flat pale grey background
+
+## Island provinces (slots 231-234)
+Same style as the province vignettes (M): small wide painting of the place.
+231 Westreach: a windswept hill-fort on a western isle, a stone causeway leading to it across the sea
+232 Cairnholm: a mountain of cairns and cliffs at the end of the western isle, seabirds below
+233 Sunderisle: a sun-bleached harbour town on a southern island
+234 Emberrock: a smoking volcanic islet with a lonely watch-tower
