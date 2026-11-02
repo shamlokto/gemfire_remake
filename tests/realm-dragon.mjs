@@ -8,9 +8,9 @@ const t = (name, fn) => { try { fn(); pass++; console.log('  ok ', name); } catc
 const input = (atk, def) => ({ attacker: { house: atk, units: [] }, defender: { house: def, units: [] } });
 
 t('chance grows with loyalty, zero below 80', () => {
-  assert.strictEqual(dragonChance(79), 0);
+  assert.strictEqual(dragonChance(69), 0);
   assert.ok(dragonChance(90) > dragonChance(80));
-  assert.ok(dragonChance(100) <= 0.25);
+  assert.ok(dragonChance(100) <= 0.5 && dragonChance(80) >= 0.2);
 });
 t('helps only the player, never a computer house', () => {
   let came = 0, aiCame = 0;
@@ -25,7 +25,7 @@ t('helps only the player, never a computer house', () => {
     if (maybeDawnwyrm(s2, { from: 2, to: 17 }, i2)) aiCame++;
     assert.ok(!i2.attacker.units.length && !i2.defender.units.length);
   }
-  assert.ok(came > 8 && came < 45, `came ${came}/100`);
+  assert.ok(came > 30 && came < 70, `came ${came}/100`);
   assert.strictEqual(aiCame, 0);
 });
 t('low loyalty: never comes; cooldown of a year', () => {

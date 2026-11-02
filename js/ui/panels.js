@@ -23,6 +23,7 @@ import { openLandView } from './landview.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
 import { modal, toast } from './events.js';
+import { dragonOdds } from '../realm/dragon.js';
 import { quote, tradeRoom, SEASON_FACTOR, TRADE_PER_MARKET, BASE_PRICE } from '../realm/market.js';
 import { sfx } from './audio.js';
 
@@ -178,7 +179,8 @@ export class RealmUI {
         h('h2', P.name),
         h('div.owner', { '--hc': houseColor(pr.owner) }, h('span.sw'), pr.owner ? HOUSE_BY_ID[pr.owner].name : 'Free hold'),
         h('div.terrain-tag', P.terrain, pr.owner && st.houses[pr.owner].capital === pid ? ' · capital' : '', gov ? ` · governed by ${VASSAL_BY_ID[gov.id].name}` : ''),
-        pr.shard && seen ? h('div.shard-tag', { '--sc': SPIRITS[pr.shard].color }, '◆ ', `${SPIRITS[pr.shard].name} shard`) : null)));
+        pr.shard && seen ? h('div.shard-tag', { '--sc': SPIRITS[pr.shard].color }, '◆ ', `${SPIRITS[pr.shard].name} shard`) : null,
+        dragonOdds(st, pid).chance ? h('div.dragon-tag', { title: dragonOdds(st, pid).reason }, `🐉 Dawnwyrm ${Math.round(dragonOdds(st, pid).chance * 100)}%`) : null)));
 
     if (!seen) {
       frag.append(h('p.hint', 'Your scouts have no news of this province. Spy on it, or take a neighbouring province, to see inside.'));
@@ -630,7 +632,8 @@ export class RealmUI {
       setTimeout(sync);
       return {
         title: 'March from ' + PROVINCES[pid].name,
-        body: [h('div.field', h('label', 'Destination'), tg),
+        body: [dragonOdds(st, pid).reason ? h('p.dragon-odds' + (dragonOdds(st, pid).chance ? '.on' : ''), '🐉 ', dragonOdds(st, pid).reason) : null,
+          h('div.field', h('label', 'Destination'), tg),
           h('div.field', h('label', `Units (up to ${mo.maxUnits})`), unitBox),
           h('div.field', h('label', 'Vassals'), vasBox),
           h('div.field', h('label', '5th slot'), fifthBox),

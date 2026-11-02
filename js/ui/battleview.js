@@ -1146,22 +1146,27 @@ export async function runBattle(container, input, opts = {}) {
       const box = root.querySelector(side === 'attacker' ? '.bt-roster-a' : '.bt-roster-d');
       box.innerHTML = '';
       const mine = b.units.filter(x => x.side === side);
-      const main = mine.filter(x => x.kind !== 'company' && x.kind !== 'spirit');
+      const main = mine.filter(x => x.kind !== 'company' && x.kind !== 'spirit' && x.kind !== 'dragon');
       const fifth = mine.find(x => x.kind === 'company' || x.kind === 'spirit') || null;
-      // 4 main slots + the 5th (company or spirit); empty slots shown dim.
+      const dragon = mine.find(x => x.kind === 'dragon') || null;
+      // 4 main slots + the 5th (company or spirit); empty slots shown dim; the Dawnwyrm, if it
+      // came, gets its own card below.
       const slots = [...main.slice(0, 4)];
       while (slots.length < 4) slots.push(null);
       slots.push(fifth || 'fifth-empty');
+      if (dragon) slots.push(dragon);
       slots.forEach((u, i) => {
         if (i === 4) { const h = el('div', 'bt-slot-label'); h.textContent = fifth ? `5th: ${fifth.kind === 'spirit' ? 'spirit' : 'company'}` : '5th: company / spirit'; box.appendChild(h); }
+        if (i === 5) { const h = el('div', 'bt-slot-label bt-slot-dragon'); h.textContent = '🐉 Holy dragon'; box.appendChild(h); }
         if (!u || u === 'fifth-empty') { const e = el('div', 'bt-card bt-card-empty'); e.textContent = i === 4 ? 'none' : 'empty slot'; box.appendChild(e); return; }
-        const card = el('button', 'bt-card' + (isSpirit(u) ? ' bt-card-spirit' : '') + (!u.leader && u.kind === 'troop' ? ' bt-card-noleader' : ''));
+        const card = el('button', 'bt-card' + (isSpirit(u) ? ' bt-card-spirit' : '') + (isDragon(u) ? ' bt-card-spirit bt-card-dragon' : '') + (!u.leader && u.kind === 'troop' ? ' bt-card-noleader' : ''));
         if (isSpirit(u)) card.style.setProperty('--spirit-col', SPIRITS[u.type].color);
+        if (isDragon(u)) card.style.setProperty('--spirit-col', '#ffe9a8');
         card.appendChild(portraitThumb(u));
         const info = el('div', 'bt-card-info');
         info.innerHTML = `<div class="bt-card-name"></div><div class="bt-card-type"></div><div class="bt-card-bar"><i></i></div><div class="bt-card-status"></div>`;
         info.querySelector('.bt-card-name').textContent = (isRuler(u) ? '♛ ' : '') + unitName(u);
-        info.querySelector('.bt-card-type').textContent = isSpirit(u) ? `${roleOf(u)} · ${SPIRITS[u.type].spell}` :
+        info.querySelector('.bt-card-type').textContent = isDragon(u) ? `Holy dragon · ${DAWNWYRM.breath.name}` : isSpirit(u) ? `${roleOf(u)} · ${SPIRITS[u.type].spell}` :
           (vassalOf(u) ? statsOf(u.type).name : roleOf(u));
         card.appendChild(info);
         card.addEventListener('click', () => { if (!u.out) { view.sel = u.id; view.mode = 'idle'; showTip(u); } });

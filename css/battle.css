@@ -225,3 +225,5 @@
 @media (max-width: 760px) { .bt-slot-label { flex: 1 1 100%; margin: 2px 2px 0; } .bt-card-empty { display: none; } }
 /* the aftermath painting behind the result card */
 .bt-result-art { background-size: cover; background-position: center; }
+.bt-slot-dragon { color: #ffe9a8 !important; }
+.bt-card-dragon { box-shadow: 0 0 14px rgba(255,220,120,.45); border-color: rgba(255,220,120,.7) !important; }
