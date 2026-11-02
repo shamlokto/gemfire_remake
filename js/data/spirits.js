@@ -24,7 +24,7 @@ export const SPIRITS = {
 export const SPIRIT_UNIT = {
   ember: { atk: 17, def: 14, move: 5, range: 1, soldiers: 85 },
   tide:  { atk: 12, def: 16, move: 4, range: 2, soldiers: 95 },
-  gale:  { atk: 12, def: 11, move: 7, range: 3, soldiers: 55, flying: true },
+  gale:  { atk: 13, def: 12, move: 7, range: 3, soldiers: 70, flying: true },
   stone: { atk: 18, def: 24, move: 2, range: 1, soldiers: 160 },
   dusk:  { atk: 15, def: 14, move: 6, range: 2, soldiers: 120, flying: true },
 };
