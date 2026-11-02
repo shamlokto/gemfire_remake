@@ -13,13 +13,14 @@
 // names the spirit unit); once it is banished it cannot cast.
 //   { t:'heal', unit, amount } { t:'side', side, round } { t:'over', winner, reason }
 
-import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from '../data/units.js';
+import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS, DAWNWYRM } from '../data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { makeRng } from '../rng.js';
 import { W, H, OBJ, TERRAIN, generateField, idx, IMPASSABLE } from './mapgen.js';
 
 export { W, H, OBJ, TERRAIN };
 // Elevation (0-3) of a square; old saved battles have none (flat).
+export { DAWNWYRM };
 export const elevAt = (b, x, y) => (b.elev ? b.elev[idx(x, y)] || 0 : 0);
 export const ELEV_BONUS = 0.10;      // striking down from higher ground +10%, up -10%
 export const LAVA_BURN = 0.03;       // units next to lava lose 3% a round (at the start of their side's turn)
@@ -27,7 +28,7 @@ export const MAX_ROUNDS = 15;
 export const ROUT_FRACTION = ROUT_LED; // led units rout below 30% of their starting soldiers
 export { ROUT_LED, ROUT_LEADERLESS };
 // Rout threshold of one unit (fraction of its starting soldiers).
-export function routAt(u) { return u.rout ?? (u.leader || u.kind === 'spirit' ? ROUT_LED : ROUT_LEADERLESS); }
+export function routAt(u) { return u.rout ?? (u.leader || u.kind === 'spirit' || u.kind === 'dragon' ? ROUT_LED : ROUT_LEADERLESS); }
 const FIFTH = new Set(['company', 'spirit']);
 export const DAMAGE_DIV = 6;           // DESIGN.md had 10; tuned so battles finish in 15 rounds
 const CAVALRY = new Set(['horse', 'knights', 'wolfriders']);
@@ -46,6 +47,7 @@ export const DIR_NAMES = Object.keys(DIRS);
 const SPIRIT_STATS = Object.fromEntries(Object.entries(SPIRIT_UNIT).map(([k, v]) =>
   [k, { ...v, name: SPIRITS[k].name, spirit: true }]));
 export function statsOf(type) {
+  if (type === 'dawnwyrm') return DAWNWYRM;
   return TROOPS[type] || COMPANIES[type] || SPIRIT_STATS[type] || MILITIA;
 }
 
@@ -53,10 +55,12 @@ export function statsOf(type) {
 // (company or spirit). A legacy side-level `spirit` becomes a spirit unit when the 5th is free.
 export function armyOf(side, tag) {
   const list = (side.units || []).filter(u => (u.soldiers || 0) > 0 || u.kind === 'spirit');
-  const main = list.filter(u => !FIFTH.has(u.kind)).slice(0, MAX_UNITS_PER_ARMY);
+  const main = list.filter(u => !FIFTH.has(u.kind) && u.kind !== 'dragon').slice(0, MAX_UNITS_PER_ARMY);
   let fifth = list.find(u => FIFTH.has(u.kind)) || null;
   if (!fifth && side.spirit && SPIRIT_UNIT[side.spirit]) fifth = { id: `${tag}-spirit`, kind: 'spirit', type: side.spirit };
-  return fifth ? [...main, fifth] : main;
+  // The Dawnwyrm comes on top of the 4 + 5th (it joins only the player's side; the realm decides).
+  const dragon = list.find(u => u.kind === 'dragon') || null;
+  return [...main, ...(fifth ? [fifth] : []), ...(dragon ? [dragon] : [])];
 }
 export function enemyOf(side) { return side === 'attacker' ? 'defender' : 'attacker'; }
 
@@ -77,6 +81,8 @@ export function createBattle(input, seed = 1) {
     spirit: { attacker: null, defender: null },        // spirit id per side (from its spirit unit)
     spiritUnit: { attacker: null, defender: null },    // that unit's id
     spiritUsed: { attacker: false, defender: false },
+    dragonUnit: { attacker: null, defender: null },    // the Dawnwyrm's unit id, if it fights
+    dragonUsed: { attacker: false, defender: false },  // its breath, once per battle
     tempWalls: [],          // { x, y, side, until }
     units: [], log: [],
   };
@@ -91,8 +97,8 @@ export function createBattle(input, seed = 1) {
       id: String(u.id), side, kind, leader, vassalId: leader, type: u.type, ruler: !!u.ruler,
       soldiers, start: soldiers,
       training: u.training ?? (spirit ? 60 : 50),
-      might: leader ? (u.might ?? 50) : (spirit ? (u.might ?? 40) : 0),
-      wits: leader ? (u.wits ?? 50) : (spirit ? (u.wits ?? 60) : 0),
+      might: leader ? (u.might ?? 50) : (spirit ? (u.might ?? 40) : u.kind === 'dragon' ? (u.might ?? 60) : 0),
+      wits: leader ? (u.wits ?? 50) : (spirit ? (u.wits ?? 60) : u.kind === 'dragon' ? (u.wits ?? 60) : 0),
       x: 0, y: 0, moved: false, acted: false, out: null,   // out: null | 'routed' | 'dead' | 'fled'
       slowed: 0, confused: 0,
       flying: !!st.flying, ghost: !!st.ignoresTerrain,
@@ -105,6 +111,7 @@ export function createBattle(input, seed = 1) {
   for (const u of [...att, ...def]) {
     u.rout = routAt(u);
     if (u.kind === 'spirit') { b.spirit[u.side] = u.type; b.spiritUnit[u.side] = u.id; }
+    if (u.kind === 'dragon') b.dragonUnit[u.side] = u.id;
   }
   deploy(b, att, def);
   b.units = [...att, ...def];
@@ -425,6 +432,42 @@ export function spellCells(b, side, target, dir) {
   return cells;
 }
 
+// ---------------------------------------------------------------- the Dawnwyrm's breath
+export function dragonOf(b, side) {
+  const id = b.dragonUnit && b.dragonUnit[side];
+  return id ? getUnit(b, id) : null;
+}
+export function canBreathe(b, side) {
+  const u = dragonOf(b, side);
+  return !b.winner && b.side === side && !!u && !u.out && !b.dragonUsed[side];
+}
+// Cells of the breath: a line of DAWNWYRM.breath.length squares from target in dir.
+export function breathCells(b, side, target, dir) {
+  const [dx, dy] = DIRS[dir] || DIRS[side === 'attacker' ? 'right' : 'left'];
+  const cells = [];
+  for (let i = 0; i < DAWNWYRM.breath.length; i++) {
+    const x = target.x + dx * i, y = target.y + dy * i;
+    if (x >= 0 && y >= 0 && x < W && y < H) cells.push({ x, y });
+  }
+  return cells;
+}
+function breathe(b, side, target, dir, events) {
+  const caster = dragonOf(b, side);
+  const cells = breathCells(b, side, target || { x: caster.x + (side === 'attacker' ? 1 : -1), y: caster.y }, dir);
+  b.dragonUsed[side] = true;
+  const hits = [];
+  events.push({ t: 'breath', side, caster: caster.id, cells, hits, dir: dir || (side === 'attacker' ? 'right' : 'left') });
+  addLog(b, `The Dawnwyrm breathes ${DAWNWYRM.breath.name}!`);
+  for (const c of cells) {
+    const u = unitAt(b, c.x, c.y);
+    if (!u || u.side === side) continue;
+    const k = Math.max(1, Math.round(u.soldiers * DAWNWYRM.breath.power));
+    hits.push({ unit: u.id, killed: k });
+    applyLoss(b, u, k, events);
+  }
+  checkOver(b, events);
+}
+
 export function spiritOf(b, side) {
   const id = b.spiritUnit && b.spiritUnit[side];
   return id ? getUnit(b, id) : null;
@@ -523,6 +566,11 @@ export function applyAction(b, a) {
     case 'spell': {
       // { type:'spell', unit: spiritUnitId, target, dir } (legacy: { side } instead of unit).
       const caster = a.unit ? getUnit(b, a.unit) : null;
+      if (caster && caster.kind === 'dragon') {
+        if (!canBreathe(b, caster.side)) return fail('the Dawnwyrm cannot breathe now');
+        breathe(b, caster.side, a.target, a.dir, events);
+        return { ok: true, events };
+      }
       const side = caster ? caster.side : a.side;
       if (a.unit && (!caster || caster.kind !== 'spirit')) return fail('not a spirit');
       if (!canCast(b, side)) return fail('spirit unavailable');

@@ -64,3 +64,13 @@ export const MAX_VASSALS_PER_PROVINCE = 5;
 export const MAX_UNITS_PER_PROVINCE = 8;
 export const MAX_UNITS_PER_ARMY = 4;   // plus the 5th slot (company or spirit)
 export const ROUT_LED = 0.30, ROUT_LEADERLESS = 0.40;
+
+// The Dawnwyrm: a holy dragon of the Lantern's light (original to Lanternfall). When the people of
+// a province adore their lord, it may descend to fight beside the PLAYER's army there as an extra
+// unit (beyond the 4 + 5th slot), then return to the sky after the battle. The strongest unit in the
+// game. Rules: js/realm/dragon.js (when it comes), js/battle/rules.js (kind 'dragon').
+export const DAWNWYRM = {
+  name: 'The Dawnwyrm', atk: 28, def: 26, move: 7, range: 2, soldiers: 220, flying: true, color: '#ffe9a8',
+  breath: { name: 'Dawnfire', shape: 'line', length: 5, power: 0.35, text: 'Once per battle it breathes a line of golden fire five squares long: enemies in it lose 35% of their soldiers.' },
+  note: 'A holy dragon of the Lantern. Comes only to lords whose people love them.',
+};

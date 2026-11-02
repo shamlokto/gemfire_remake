@@ -31,6 +31,7 @@ import { applyOrder, resetOrders, moveVassal } from './orders.js';
 import { betaTopUp } from './state.js';
 import { monthlyTick, foodUpkeep } from './economy.js';
 import { marketTick, aiTrade, initMarket } from './market.js';
+import { maybeDawnwyrm, stripDragon } from './dragon.js';
 import { planHouseOrders } from './ai.js';
 import { defect, joinHouse } from './diplomacy.js';
 
@@ -436,6 +437,7 @@ async function resolveMarch(state, m, opts, summary) {
   }
   const input = buildBattleInput(state, m);
   if (!input.attacker.units.length) { returnHome(state, m); return; }
+  maybeDawnwyrm(state, m, input);
   let result;
   const defenders = input.defender.units.filter(u => u.soldiers > 0);
   if (!defenders.length) {
@@ -454,6 +456,7 @@ async function resolveMarch(state, m, opts, summary) {
       result = await auto(input, seed);   // auto.js takes a numeric seed
     }
   }
+  stripDragon(result);
   applyBattleResult(state, m, input, result);
   summary.battles.push({ march: m, input, result });
 }

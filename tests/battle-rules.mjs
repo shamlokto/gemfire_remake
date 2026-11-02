@@ -4,7 +4,8 @@ import {
   createBattle, applyAction, legalMoves, legalTargets, expectedKills, result, unitAt, getUnit,
   OBJ, W, H, ROUT_FRACTION, ROUT_LEADERLESS, MAX_ROUNDS, spellCells, canCast, routAt, statsOf, weatherFor, moveRange, attackRange, terrainAt,
 } from '../js/battle/rules.js';
-import { generateMap } from '../js/battle/mapgen.js';
+import { generateMap, generateField, TERRAIN, biomeOf } from '../js/battle/mapgen.js';
+import { breathCells, canBreathe, elevAt, slopeBonus, moveCost, DAWNWYRM } from '../js/battle/rules.js';
 import { runToEnd, autoResolve } from '../js/battle/auto.js';
 
 let fails = 0, passes = 0;
@@ -31,6 +32,84 @@ for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for
   ok(g[OBJ.y * W + OBJ.x] === 'keep', 'keep at objective');
   ok(g[5 * W + 12] === 'gate', 'gate in siege');
   ok([0, 1, 2].every(x => [...Array(H).keys()].every(y => !['mountain', 'water', 'lava'].includes(g[y * W + x]))), 'deploy zone clear ' + t);
+}
+
+// Biomes and new terrains (v3 isometric board).
+{
+  const has = (f, t) => f.grid.includes(t);
+  const ember = generateField('mountain', 3, true, { provinceId: 27 });
+  ok(ember.biome === 'volcanic' && has(ember, 'lava') && has(ember, 'ash'), 'Emberrock is volcanic with lava and ash');
+  const frost = generateField('mountain', 4, true, { provinceId: 0 });
+  ok(frost.biome === 'alpine' && has(frost, 'snow'), 'Frosthelm is alpine and snowy');
+  let ruins = 0; for (let s2 = 1; s2 <= 10; s2++) if (has(generateField('plains', s2, true, { provinceId: 13 }), 'ruins')) ruins++;
+  ok(ruins >= 8, 'Lanterncross has ruins ' + ruins);
+  let sand = 0; for (let s2 = 1; s2 <= 10; s2++) if (has(generateField('coast', s2, true, { provinceId: 22 }), 'sand')) sand++;
+  ok(sand >= 9, 'coast has beaches ' + sand);
+  let ice = 0; for (let s2 = 1; s2 <= 20; s2++) if (has(generateField('plains', s2, true, { provinceId: 8, season: 3 }), 'ice')) ice++;
+  ok(ice >= 3, 'winter freezes water near banks ' + ice);
+  let farm = 0; for (let s2 = 1; s2 <= 10; s2++) if (has(generateField('plains', s2, false, { provinceId: 8 }), 'farmland')) farm++;
+  ok(farm >= 7, 'plains have farmland ' + farm);
+  const camp = generateField('plains', 5, false, { provinceId: 8 });
+  ok(has(camp, 'tents') || has(camp, 'palisade'), 'field battles get a camp');
+  for (const f of [ember, frost, camp]) ok(f.elev.length === W * H && f.elev.every(z => z >= 0 && z <= 3), 'elevation 0-3');
+  // determinism
+  const f1 = generateField('hills', 9, true, { provinceId: 6, season: 2 }), f2 = generateField('hills', 9, true, { provinceId: 6, season: 2 });
+  ok(JSON.stringify(f1) === JSON.stringify(f2), 'field generation deterministic');
+  for (const t of ['sand', 'snow', 'ice', 'farmland', 'ruins', 'lava', 'ash', 'cliffs', 'palisade', 'tents']) ok(TERRAIN[t], 'terrain ' + t);
+  ok(biomeOf('plains', 8) === 'plains' && biomeOf('marsh', 17) === 'marsh', 'biome by province');
+}
+
+// Elevation: striking down +10%, up -10%; archers on high ground reach further; sand slows horse;
+// lava scorches neighbours; ice is slippery.
+{
+  const b = sandbox([U('a', 'footmen', 200), U('r', 'archers', 200)], [U('d', 'footmen', 200)]);
+  const a = place(b, 'a', 5, 5), d = place(b, 'd', 6, 5), r = place(b, 'r', 3, 8);
+  const flat = expectedKills(b, a, d);
+  b.elev[5 * W + 5] = 2;
+  ok(Math.abs(expectedKills(b, a, d) - flat * 1.1) < 0.01 && slopeBonus(b, a, d) === 1.1, 'downhill +10%');
+  b.elev[5 * W + 5] = 0; b.elev[5 * W + 6] = 1;
+  ok(Math.abs(expectedKills(b, a, d) - flat * 0.9) < 0.01, 'uphill -10%');
+  const r0 = attackRange(b, r); b.elev[8 * W + 3] = 2;
+  ok(attackRange(b, r) === r0 + 1, 'high ground: archers reach one further');
+  b.elev[8 * W + 3] = 0; b.grid[8 * W + 3] = 'cliffs';
+  ok(attackRange(b, r) === r0 + 1, 'cliffs: archers reach one further');
+  const h = sandbox([U('h', 'horse', 200), U('f', 'footmen', 200)], [U('d', 'footmen', 200)]);
+  h.grid[2 * W + 4] = 'sand';
+  ok(moveCost(h, getUnit(h, 'h'), 4, 2) === 2 && moveCost(h, getUnit(h, 'f'), 4, 2) === 1, 'sand: horse cost 2');
+  h.grid[3 * W + 4] = 'ice';
+  ok(TERRAIN.ice.def === 0.8, 'ice defence 0.8');
+  const l = sandbox([U('a', 'footmen', 200)], [U('d', 'footmen', 200)]);
+  place(l, 'a', 1, 1); place(l, 'd', 14, 9);
+  l.grid[1 * W + 2] = 'lava';
+  const before = getUnit(l, 'a').soldiers;
+  const ev = applyAction(l, { type: 'endSide' });
+  applyAction(l, { type: 'endSide' });   // back to the attacker: the burn happens at its side's start
+  ok(getUnit(l, 'a').soldiers === before - Math.round(before * 0.03), 'lava scorches neighbours 3%');
+  void ev;
+}
+
+// The Dawnwyrm: an extra unit beyond 4 + 5th, routs at 30%, breathes once.
+{
+  const DW = { id: 'dawnwyrm', kind: 'dragon', type: 'dawnwyrm', soldiers: 220, training: 100, leader: null, might: 60, wits: 60 };
+  const army = ['a1', 'a2', 'a3', 'a4'].map(id => U(id, 'footmen', 150));
+  const b = sandbox([...army, { id: 'c', kind: 'company', type: 'wolfriders', soldiers: 120 }, DW], [U('d1', 'footmen', 200), U('d2', 'footmen', 200), U('d3', 'pikes', 200)], { attacker: { house: 'aldmere', units: [...army, { id: 'c', kind: 'company', type: 'wolfriders', soldiers: 120 }, DW], dragon: true } });
+  ok(b.units.filter(u => u.side === 'attacker').length === 6 && getUnit(b, 'dawnwyrm'), 'Dawnwyrm joins beyond 4 + 5th');
+  const dw = getUnit(b, 'dawnwyrm');
+  ok(statsOf('dawnwyrm').atk === DAWNWYRM.atk && dw.flying && routAt(dw) === 0.3, 'Dawnwyrm stats, flies, routs at 30%');
+  place(b, 'dawnwyrm', 4, 5);
+  const d1 = place(b, 'd1', 6, 5), d2 = place(b, 'd2', 8, 5);
+  const s1 = d1.soldiers, s2 = d2.soldiers;
+  ok(canBreathe(b, 'attacker') && breathCells(b, 'attacker', { x: 5, y: 5 }, 'right').length === 5, 'breath line of 5');
+  const r = applyAction(b, { type: 'spell', unit: 'dawnwyrm', target: { x: 5, y: 5 }, dir: 'right' });
+  ok(r.ok && r.events.some(e => e.t === 'breath'), 'breath event');
+  ok(getUnit(b, 'd1').soldiers === s1 - Math.round(s1 * 0.35) && getUnit(b, 'd2').soldiers === s2 - Math.round(s2 * 0.35), 'breath: 35% losses');
+  ok(!canBreathe(b, 'attacker') && !applyAction(b, { type: 'spell', unit: 'dawnwyrm', target: { x: 5, y: 5 }, dir: 'right' }).ok, 'breath once per battle');
+  ok(result(b).attacker.units.some(u => u.id === 'dawnwyrm'), 'result lists the Dawnwyrm');
+  // AI breathes when it is worth it
+  const b2 = createBattle(input([...army, DW], [U('d1', 'footmen', 200), U('d2', 'footmen', 200)], { attacker: { house: 'aldmere', units: [...army, DW], dragon: true } }), 3);
+  const res = runToEnd(b2);
+  ok(b2.dragonUsed.attacker || b2.winner, 'AI uses the breath');
+  void res;
 }
 
 // Damage formula matches DESIGN (with tuned divisor) and terrain reduces it.

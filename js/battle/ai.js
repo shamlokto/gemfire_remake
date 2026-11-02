@@ -7,7 +7,7 @@
 
 import {
   W, OBJ, statsOf, reachable, elevAt, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
-  dist, getUnit, canCast, spellCells, unitAt, routAt, MAX_ROUNDS, DIR_NAMES, terrainAt,
+  dist, getUnit, canCast, spellCells, canBreathe, breathCells, dragonOf, DAWNWYRM, unitAt, routAt, MAX_ROUNDS, DIR_NAMES, terrainAt,
   moveRange, attackRange,
 } from './rules.js';
 import { SPIRITS } from '../data/spirits.js';
@@ -187,8 +187,28 @@ function planUnit(b, u) {
   return { type: 'wait', unit: u.id };
 }
 
+// The Dawnwyrm's breath: the line through enemies that burns the most value; held until it is worth
+// a good share of the enemy (or the battle is late).
+function planBreath(b, side) {
+  if (!canBreathe(b, side)) return null;
+  const me = dragonOf(b, side), foes = liveUnits(b, enemyOf(side));
+  if (!foes.length) return null;
+  let best = null, bv = 0;
+  for (const f of foes) for (const d of DIR_NAMES) for (const back of [0, 1, 2]) {
+    const [dx, dy] = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] }[d];
+    const target = { x: f.x - dx * back, y: f.y - dy * back };
+    let v = 0;
+    for (const c of breathCells(b, side, target, d)) { const u = unitAt(b, c.x, c.y); if (u && u.side !== side) v += u.soldiers * DAWNWYRM.breath.power * value(u) / 20; if (u && u.side === side) v -= 0; }
+    if (v > bv) { bv = v; best = { type: 'spell', unit: me.id, target, dir: d }; }
+  }
+  const foeTotal = foes.reduce((s, f) => s + f.soldiers, 0);
+  return best && (bv >= Math.max(10, foeTotal * 0.12) || b.round >= MAX_ROUNDS - 2) ? best : null;
+}
+
 export function chooseAction(b, side = b.side) {
   if (b.winner || b.side !== side) return { type: 'endSide' };
+  const br = planBreath(b, side);
+  if (br) return br;
   const sp = planSpell(b, side);
   if (sp) return sp;
   // Ranged units first (they shoot before melee blocks lines), then the rest by strength.

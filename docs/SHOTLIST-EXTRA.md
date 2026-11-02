@@ -243,3 +243,14 @@ small margin, plain flat pale grey background, so they can be cut out.
 **Z12. Isometric battle props (6)**: isometric game prop sprite, 2:1 isometric angle, centred, plain flat pale grey background
 473 Castle wall section with battlements 474 Castle gatehouse 475 Castle keep tower with a banner 476 Wooden palisade
 477 Army tents with banners 478 Siege ladder against a broken wall
+
+## The Dawnwyrm (slots 479-482)
+
+An original holy dragon of the Lantern's light: long and serpentine, pale gold and ivory scales,
+feathered white wings, a soft halo of light behind its horned head, calm golden eyes.
+
+**Z13. The Dawnwyrm (4)**: the creature described above
+479 Portrait of the Dawnwyrm's head and neck, glowing, dark sky behind
+480 Isometric game unit sprite of the Dawnwyrm hovering with wings spread, 2:1 isometric angle, facing down-right, plain flat pale grey background
+481 The Dawnwyrm descending through parted clouds over a battlefield in a shaft of golden light, troops looking up, wide cinematic
+482 Side-view game sprite of the Dawnwyrm breathing golden fire, facing right, full body, plain flat pale grey background

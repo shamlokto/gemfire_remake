@@ -59,7 +59,13 @@ export const SLOTS = [
   ...S(379, 434, 'isounit', 320, 320, 'cutout'),
   ...S(435, 458, 'fighter', 320, 320, 'cutout'),
   ...S(459, 478, 'isosprite', 384, 384, 'cutout'),
+  // The Dawnwyrm (Z13)
+  ...S(479, 479, 'portrait', 512, 640, 'cover'),
+  ...S(480, 480, 'isounit', 320, 320, 'cutout'),
+  ...S(481, 481, 'cutin', 1600, 700, 'cover'),
+  ...S(482, 482, 'fighter', 320, 320, 'cutout'),
 ];
+export const DRAGON_ART = { portrait: 479, iso: 480, summon: 481, fighter: 482 };
 
 // Isometric battle board art (Z8-Z12).
 const ISO_TROOPS = ['footmen', 'pikes', 'archers', 'horse', 'knights', 'siege'];

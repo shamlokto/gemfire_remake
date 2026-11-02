@@ -84,6 +84,38 @@ def cutout(img, w, h, tol=34):
         if x < w - 1: q.append((x + 1, y))
         if y > 0: q.append((x, y - 1))
         if y < h - 1: q.append((x, y + 1))
+    # Enclosed pockets of background (inside a bow, between an arm and the body): flat regions
+    # very close to the background colour that the border fill could not reach. Shaded pale areas
+    # (white armour, snow) vary in colour and are kept.
+    def near_tight(c):
+        return max(abs(c[0] - bg[0]), abs(c[1] - bg[1]), abs(c[2] - bg[2])) <= 16
+    minsize = max(40, w * h // 900)
+    seen2 = bytearray(w * h)
+    for y0 in range(h):
+        for x0 in range(w):
+            i0 = y0 * w + x0
+            if seen2[i0] or mp[x0, y0] == 0 or not near_tight(px[x0, y0]):
+                continue
+            comp = []
+            q2 = deque([(x0, y0)])
+            seen2[i0] = 1
+            while q2:
+                x, y = q2.popleft()
+                comp.append((x, y))
+                for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                    if 0 <= nx < w and 0 <= ny < h:
+                        j = ny * w + nx
+                        if not seen2[j] and mp[nx, ny] != 0 and near_tight(px[nx, ny]):
+                            seen2[j] = 1
+                            q2.append((nx, ny))
+            if len(comp) < minsize:
+                continue
+            n = len(comp)
+            mean = [sum(px[x, y][k] for x, y in comp) / n for k in range(3)]
+            var = sum(sum((px[x, y][k] - mean[k]) ** 2 for k in range(3)) for x, y in comp) / (n * 3)
+            if var < 30:   # flat: background showing through
+                for x, y in comp:
+                    mp[x, y] = 0
     # Soften: shrink by 1px then blur, so the halo of background colour disappears.
     mask = mask.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(1.2))
     out = img.convert('RGBA')
