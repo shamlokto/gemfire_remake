@@ -39,7 +39,7 @@ export const HOUSE_BY_ID = Object.fromEntries(HOUSES.map(h => [h.id, h]));
 
 // Starting province bonuses per house, applied on top of PROVINCE_DEFAULTS.
 export const HOUSE_START = {
-  aldmere:   { fields: 45, market: 30, food: 220, gold: 120, loyalty: 65 },
+  aldmere:   { fields: 45, market: 40, food: 300, gold: 220, loyalty: 75 },
   corvane:   { fields: 35, market: 25, food: 180, gold: 110, loyalty: 60 },
   isolde:    { fields: 30, market: 50, food: 150, gold: 220, loyalty: 60 },
   hrothgar:  { fields: 25, market: 20, food: 160, gold: 90,  loyalty: 70 },

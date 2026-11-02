@@ -26,7 +26,19 @@ export const TUNING = {
   minMarchTraining: 35,
   aggression: 0.6,         // chance per province per month to consider attacking a house
   raiseGold: 160,          // gold (after reserve) before raising a new unit in peacetime
+  coalition: 0.2,          // attack margin given up against the leading house (balance of power)
 };
+
+// The house everyone fears: most provinces (at least 7) or 3+ shards.
+function leadingHouse(state) {
+  let best = null, bn = 0;
+  for (const [id, h] of Object.entries(state.houses)) {
+    if (!h.alive) continue;
+    const n = state.provinces.filter(p => p.owner === id).length + 2 * state.provinces.filter(p => p.owner === id && p.shard).length;
+    if (n > bn) { bn = n; best = id; }
+  }
+  return bn >= 9 ? best : null;
+}
 const RESERVE_GOLD = 30;
 
 function hostile(state, house, pid) {
@@ -64,7 +76,7 @@ export function planHouseOrders(state, house, rng) {
   if (!owned.length) return orders;
   const dist = frontierDistance(state, house);
   const early = state.turn < 48;
-  const ctx = { dist, early, incoming: {}, incomingUnits: {}, diplomacyDone: false, spiritQueued: false, queued: {} };
+  const ctx = { dist, early, incoming: {}, incomingUnits: {}, diplomacyDone: false, spiritQueued: false, queued: {}, leader: leadingHouse(state) };
 
   // Free actions first: leaders for the biggest units.
   for (const pr of owned) orders.push(...assignLeaders(state, pr));
@@ -230,11 +242,14 @@ function chooseAttack(state, house, pr, vs, units, ctx, rng) {
     if (threatTo(state, house, pr.id, n) > 0 && fighters.length > 1) group = fighters.slice(1, MAX_MARCH + 1);
     const power = group.reduce((a, u) => a + troopPower(state, u), 0) + fifthPower;
     const ratio = power / def;
-    const need = (t.owner ? TUNING.attackRatio : TUNING.freeholdRatio) + (isSeaLane(pr.id, n) ? TUNING.seaLaneExtra : 0);
+    const vsLeader = t.owner && t.owner === ctx.leader && house !== ctx.leader;
+    const need = (t.owner ? TUNING.attackRatio : TUNING.freeholdRatio) + (isSeaLane(pr.id, n) ? TUNING.seaLaneExtra : 0) -
+      (vsLeader ? TUNING.coalition : 0);
     if (ratio < need) continue;
     let score = ratio;
     if (!t.owner && ctx.early) score += 0.6;
     if (t.shard) score += 1.2;
+    if (vsLeader) score += 0.5;
     if (t.owner && state.houses[t.owner].capital === n) score += 0.3;
     if (ADJACENCY[n].length === 1) score += 0.2;   // dead ends are safe to hold
     score += t.fields / 200 + t.market / 200;

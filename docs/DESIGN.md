@@ -156,7 +156,7 @@ Victory: `VICTORY_PROVINCES` = 20 provinces, or all 5 shards. Each province has 
 * A unit with a leader adds the leader's Might (attack/defence) and Wits (ranged, spells) in
   battle; a leaderless unit fights with might = wits = 0 and routs earlier (below 40% instead of 30%).
 * Orders change accordingly:
-  - `muster` {province, type, soldiers, unit?}: adds soldiers to an existing unit (`unit` uid) or
+  - `muster` {province, troop, soldiers, unit?}: adds soldiers to an existing unit (`unit` uid) or
     raises a new unit of `type` (if under the unit cap). Cost as before.
   - `train` {province, unit?}: trains one unit, or all units in the province if none given.
   - `assign` {province, unit, vassal|null} is a **free action** (does not use the province's order):

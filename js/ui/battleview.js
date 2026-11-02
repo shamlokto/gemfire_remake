@@ -483,7 +483,10 @@ export async function runBattle(container, input, opts = {}) {
   };
   for (const u of b.units) view.disp.set(u.id, { x: u.x, y: u.y, alpha: u.out ? 0 : 1, flash: 0, phase: hash(u.x, u.y, 7) * 6.28, lunge: null });
 
-  const speed = () => prefs.speed;
+  // When the player hands the battle to Auto, play it faster with short cut-ins.
+  const autoHurry = () => view.auto && playerSide != null;
+  const speed = () => prefs.speed * (autoHurry() ? 3 : 1);
+  const cutMode = () => (autoHurry() && prefs.cutins === 'full' ? 'short' : prefs.cutins);
   function tween(ms, fn) {
     return new Promise(res => view.tweens.push({ t0: view.now, dur: Math.max(1, ms / speed()), fn, res }));
   }
@@ -987,8 +990,8 @@ export async function runBattle(container, input, opts = {}) {
 
   // A clash cut-in: attacker left, defender right (from the attacker's point of view).
   function clashCutin(att, def, hit, counter) {
-    if (prefs.cutins === 'off') return Promise.resolve();
-    const short = prefs.cutins === 'short';
+    if (cutMode() === 'off') return Promise.resolve();
+    const short = cutMode() === 'short';
     const dur = short ? 750 : (counter ? 1750 : 1300);
     const strikeAt = short ? 0.3 : (counter ? 0.3 : 0.4);
     const counterAt = 0.62;
@@ -1069,8 +1072,8 @@ export async function runBattle(container, input, opts = {}) {
     const sp = SPIRITS[spiritId];
     sfx.play('spell'); sfx.play('wind');
     try { playSting('summon'); } catch { /* audio unavailable */ }
-    if (prefs.cutins === 'off') return Promise.resolve();
-    const short = prefs.cutins === 'short';
+    if (cutMode() === 'off') return Promise.resolve();
+    const short = cutMode() === 'short';
     const motes = [];
     return showCutin(short ? 1000 : 2100, (cg, W2, H2, k, dt) => {
       const dark = k < 0.2 ? k / 0.2 : k > 0.85 ? (1 - k) / 0.15 : 1;
@@ -1110,8 +1113,8 @@ export async function runBattle(container, input, opts = {}) {
 
   // Outcome moments: a banner strip with art, a title and a bark.
   function momentCutin(slot, title, sub, color = '#ffd27a') {
-    if (prefs.cutins === 'off') { showBanner(title); return Promise.resolve(); }
-    const short = prefs.cutins === 'short';
+    if (cutMode() === 'off') { showBanner(title); return Promise.resolve(); }
+    const short = cutMode() === 'short';
     return showCutin(short ? 900 : 1600, (cg, W2, H2, k) => {
       const bd = band(W2, H2, k, 0.12, 0.15);
       cg.fillStyle = `rgba(5,4,8,${0.5 * bd.open})`; cg.fillRect(0, 0, W2, H2);
@@ -1382,7 +1385,7 @@ export async function runBattle(container, input, opts = {}) {
       await tween(160, k => { dA.lunge.p = k * 0.5; });
     }
     // cut-in for the exchange (melee always; ranged only in Full mode)
-    const showClash = prefs.cutins !== 'off' && (!ranged || prefs.cutins === 'full');
+    const showClash = cutMode() !== 'off' && (!ranged || cutMode() === 'full');
     if (showClash) {
       if (Math.random() < 0.35 || routed) showBark(att, 'attack');
       await clashCutin(att, def, hit, counter);
@@ -1415,7 +1418,7 @@ export async function runBattle(container, input, opts = {}) {
     floatText(u.x, u.y, u.out === 'dead' ? 'Destroyed!' : 'Routed!', '#ffd27a', true);
     showBark(u, 'rout');
     const anyLeft = liveUnits(b, u.side).length;
-    if (prefs.cutins === 'full' && (isRuler(u) || u.start >= 150 || !anyLeft)) {
+    if (cutMode() === 'full' && (isRuler(u) || u.start >= 150 || !anyLeft)) {
       await momentCutin(BATTLE_MOMENT.rout, u.out === 'dead' ? 'Destroyed' : 'Routed', `${unitName(u)} breaks and flees the field.`, '#ffc070');
     }
     const fx = u.side === 'attacker' ? -1 : 1;
@@ -1427,7 +1430,7 @@ export async function runBattle(container, input, opts = {}) {
 
   async function spellSequence(e) {
     const sp = SPIRITS[e.spirit];
-    if (prefs.cutins === 'full') await momentCutin(SPIRIT_CUTIN[e.spirit], sp.spell, `${sp.name} unleashes its power`, sp.color);
+    if (cutMode() === 'full') await momentCutin(SPIRIT_CUTIN[e.spirit], sp.spell, `${sp.name} unleashes its power`, sp.color);
     else { sfx.play('spell'); }
     showBanner(`${sp.name}: ${sp.spell}`, e.side);
     view.fx = { t0: view.now, dur: 1400 / speed(), cells: e.cells, spirit: e.spirit, bolts: e.spirit === 'gale' };
