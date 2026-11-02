@@ -412,3 +412,14 @@ p.warn { color: #f0a070; background: rgba(160,60,30,0.15); border: 1px solid rgb
   .land-overlay .land-bar { padding: 8px 12px; gap: 8px; }
   .land-overlay .land-bar h2 { font-size: 17px; }
 }
+
+/* Beta tester mode */
+.beta-box { margin: 14px auto 0; max-width: 640px; padding: 10px 14px; border: 1px dashed var(--accent); border-radius: 8px;
+  background: rgba(217, 169, 74, .07); display: grid; gap: 6px; text-align: left; }
+.beta-row { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; cursor: pointer; font-size: 15px; color: var(--text); }
+.beta-row.sub { padding-left: 26px; color: var(--muted); font-size: 14px; }
+.beta-row b { color: var(--accent); font-family: var(--font-display, serif); letter-spacing: .04em; }
+.beta-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+.beta-badge { margin-left: 8px; font-family: var(--font-display, serif); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: #1a1206; background: linear-gradient(180deg, #f3d27a, #c9962e); border-radius: 4px; padding: 2px 6px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(243, 210, 122, .35); }

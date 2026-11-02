@@ -223,3 +223,5 @@
 .bt-card-spirit .bt-card-name { color: var(--spirit-col); }
 .bt-spirit.bt-linked { box-shadow: 0 0 0 2px var(--accent, #d8b05a), 0 0 14px rgba(255, 215, 120, .5); }
 @media (max-width: 760px) { .bt-slot-label { flex: 1 1 100%; margin: 2px 2px 0; } .bt-card-empty { display: none; } }
+/* the aftermath painting behind the result card */
+.bt-result-art { background-size: cover; background-position: center; }

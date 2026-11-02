@@ -21,7 +21,7 @@ import { sfx } from './sfx.js';
 import { playSting } from './audio.js';
 import {
   art, hasArt, TERRAIN_TILE, CLASH_CUTIN, SPIRIT_CUTIN, BATTLE_MOMENT, WEATHER_FX, BATTLE_FRAME,
-  BATTLE_BACKDROP, CREST, houseTroopSprite,
+  BATTLE_BACKDROP, CREST, houseTroopSprite, CLASH_BACKDROP, BATTLE_MOMENT2, HOUSE_CHARGE, FX_ART, SPIRIT_SIGIL,
 } from '../data/art.js';
 import { HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
@@ -30,6 +30,7 @@ import { PROVINCES } from '../data/world.js';
 import { palette, squadSize, formation, attackAct, MOUNTED, POWDER, FLYING, HUGE, launchPoint } from './battle-anim/figures.js';
 import { blitFigure } from './battle-anim/figcache.js';
 import { drawSpirit } from './battle-anim/spirit-art.js';
+import { setFxImages } from './battle-anim/fx.js';
 import { Particles, reducedMotion, blob } from './battle-anim/fx.js';
 import { ClashScene } from './battle-anim/choreo.js';
 import { ClashRenderer } from './battle-anim/clashfx.js';
@@ -269,13 +270,39 @@ export async function runBattle(container, input, opts = {}) {
   };
   const isAI = side => playerSide !== side || view.auto;
 
+  // Painted battlefield behind the board and the clash scenes: by terrain, weather and season, a
+  // castle when the keep is besieged (day, night late in the battle, burning once the gate falls),
+  // a river crossing when the map has a bridge, and special places (Emberrock, the old ruins).
+  const provName = (PROVINCES[b.provinceId] || {}).name;
+  const hasBridge = b.grid.includes('bridge');
+  function backdropSlot() {
+    const C = CLASH_BACKDROP, s2 = b.season, w2 = b.weather, cand = [];
+    if (b.siege) cand.push(view.gateFallen ? C.siege.burning : b.round >= 10 ? C.siege.night : C.siege.day);
+    if (provName === 'Emberrock') cand.push(C.volcanic.day);
+    if (provName === 'Lanterncross' || provName === 'Fenwick') cand.push(C.ruins.day);
+    const t2 = { plains: 'plains', coast: 'coast', forest: 'forest', hills: 'hills', mountain: 'mountain', marsh: 'marsh' }[b.terrain] || 'plains';
+    const T2 = C[t2] || {};
+    if (w2 === 'snow' || s2 === 3) cand.push(T2.snow);
+    if (w2 === 'fog') cand.push(T2.fog);
+    if (w2 === 'rain') cand.push(t2 === 'coast' ? T2.storm : T2.rain || (t2 === 'plains' ? C.plains.rain : null));
+    if (hasBridge && !b.siege) cand.push(C.river.day);
+    if (s2 === 2) cand.push(T2.autumn || T2.dusk);
+    if (s2 === 0) cand.push(T2.spring || T2.dawn);
+    cand.push(T2.day, T2.dusk, T2.fog, BATTLE_BACKDROP[b.terrain]);
+    return cand.find(x => x != null && hasArt(x)) ?? BATTLE_BACKDROP[b.terrain];
+  }
+  const momentsShown = new Set();   // each BATTLE_MOMENT2 at most once per battle
+
   // Preload real art only (placeholders are never drawn on the board).
-  const want = new Set([BATTLE_FRAME, BATTLE_BACKDROP[b.terrain], ...Object.values(BATTLE_MOMENT), CREST[b.houses.attacker], CREST[b.houses.defender]]);
+  const want = new Set([BATTLE_FRAME, BATTLE_BACKDROP[b.terrain], ...Object.values(BATTLE_MOMENT), CREST[b.houses.attacker], CREST[b.houses.defender],
+    ...Object.values(CLASH_BACKDROP).flatMap(o => Object.values(o)).filter(x => x != null), ...Object.values(BATTLE_MOMENT2), ...Object.values(FX_ART),
+    HOUSE_CHARGE[b.houses.attacker], ...Object.values(SPIRIT_SIGIL)]);
   if (b.weather) want.add(WEATHER_FX[b.weather]);
   for (const k of new Set(b.grid)) want.add(TERRAIN_TILE[k]);
   for (const u of b.units) { want.add(isSpirit(u) ? SPIRIT_CUTIN[u.type] : CLASH_CUTIN[u.type]); want.add(portraitSlot(u)); const s = spriteSlot(u); if (s) want.add(s.slot); }
   for (const side of ['attacker', 'defender']) if (b.spirit[side]) { want.add(SPIRIT_CUTIN[b.spirit[side]]); want.add(SPIRITS[b.spirit[side]].fx); want.add(SPIRITS[b.spirit[side]].art); }
   await Promise.all([...want].filter(s => s != null && hasArt(s)).map(s => loadImg(art(s))));
+  setFxImages(Object.fromEntries(Object.entries(FX_ART).map(([k, v]) => [k, artImg(v)]).filter(([, im]) => im)));
 
   // ---------------------------------------------------------------- DOM
   container.innerHTML = '';
@@ -396,7 +423,7 @@ export async function runBattle(container, input, opts = {}) {
 
   // ---------------------------------------------------------------- drawing
   function drawBackdrop() {
-    const im = artImg(BATTLE_BACKDROP[b.terrain]);
+    const im = artImg(backdropSlot());
     if (im) {
       drawCover(g, im, 0, 0, view.w, view.h, 1.05 + Math.sin(view.now / 9000) * 0.02);
       g.fillStyle = 'rgba(10,8,14,0.45)'; g.fillRect(0, 0, view.w, view.h);
@@ -618,6 +645,14 @@ export async function runBattle(container, input, opts = {}) {
     const fy = cy - cs * (fly ? 0.45 : 0.3) + Math.sin(t * 1.8 + d.phase) * cs * 0.06;
     g.save();
     g.globalAlpha *= 0.4; g.drawImage(blob(0, 0, 0), cx - cs * 0.5, cy + cs * 0.22, cs, cs * 0.25); g.restore();
+    const sig = artImg(SPIRIT_SIGIL[u.type]);
+    if (sig) {   // a glowing summoning circle turning under the spirit (brighter while it casts)
+      const glow = (d.flash || 0), r = cs * (0.62 + glow * 0.35);
+      g.save(); g.globalCompositeOperation = 'screen';
+      g.globalAlpha = (b.spiritUsed[u.side] ? 0.35 : 0.75) + glow * 0.25;
+      g.translate(cx, cy + cs * 0.3); g.scale(1, 0.45); g.rotate(t * 0.6);
+      g.drawImage(sig, -r, -r, r * 2, r * 2); g.restore();
+    }
     drawSpirit(g, u.type, cx, fy, cs * (u.type === 'tide' ? 1.5 : 1.35), t + d.phase, { facing: d.facing, run: d.walking ? 1 : 0 });
     if (b.spiritUsed[u.side]) { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.setLineDash([3, 3]); g.beginPath(); g.arc(cx, fy, cs * 0.62, 0, 7); g.stroke(); g.setLineDash([]); }
     void sp;
@@ -906,7 +941,7 @@ export async function runBattle(container, input, opts = {}) {
       const fx = new ClashRenderer(scene, {
         colours: { attacker: { color: S[att.side].color, accent: S[att.side].accent }, defender: { color: S[def.side].color, accent: S[def.side].accent } },
         names: { attacker: nm(att), defender: nm(def) },
-        art: artImg(isSpirit(att) ? SPIRIT_CUTIN[att.type] : (CLASH_CUTIN[att.type] ?? null)),
+        art: artImg(backdropSlot()) || artImg(isSpirit(att) ? SPIRIT_CUTIN[att.type] : (CLASH_CUTIN[att.type] ?? null)),
         terrain: b.terrain, weather: b.weather, season: b.season, caption: `${unitName(att)} ${verbOf(att)}`,
         drawPortrait: (cg, role, x, y, w, h, flip) => portraitCard(cg, R[role], x, y, w, h, R[role].side, flip),
         drawCrest: (cg, role, x, y, s2) => crestAt(cg, R[role].side, x, y, s2),
@@ -1212,6 +1247,7 @@ export async function runBattle(container, input, opts = {}) {
         const p = px(u.x, u.y);
         view.P.embers(p.x, p.y + view.cs * 0.1, 10, [140, 255, 150], 0.7);
       } else if (e.t === 'gate') {
+        view.gateFallen = true;
         sfx.play('gate');
         const u = getUnit(b, e.unit), p = px(u.x, u.y);
         view.P.explode(p.x, p.y, 0.9, [255, 170, 80]); view.P.debris(p.x, p.y, 12, [110, 80, 50], 4); shakeBy(10);
@@ -1254,7 +1290,35 @@ export async function runBattle(container, input, opts = {}) {
     tween(260, k => { if (dD.recoil) dD.recoil.p = k; }).then(() => { dD.recoil = null; });
   }
 
+  // Extra painted moments (BATTLE_MOMENT2): brief, skippable, at most once each per battle, only with
+  // full cut-ins and never while Auto hurries the battle along.
+  async function extraMoment(key, title, sub, color = '#ffd27a') {
+    const slot = BATTLE_MOMENT2[key];
+    if (momentsShown.has(key) || cutMode() !== 'full' || autoHurry() || !artImg(slot)) return;
+    momentsShown.add(key);
+    await momentCutin(slot, title, sub, color);
+  }
+  const COMPANY_MOMENT = { golem: ['golemGate', 'The Golem Strides In', 'Clay and stone against timber.'],
+    bombard: ['bombardWall', 'The Bombard Roars', 'Iron shot against old stone.'], arquebusiers: ['arquebusStakes', 'Thunder and Smoke', 'The arquebusiers fire behind their stakes.'],
+    harpies: ['harpyDive', 'Harpies!', 'Shrieking shapes fall out of the sky.'], lizardfolk: ['lizardAmbush', 'From the Reeds', 'The lizardfolk strike from the water.'],
+    giants: ['giantBoulders', 'The Giants Hurl', 'Boulders the size of carts.'], skeletons: ['skeletonMist', 'The Dead March', 'Bones rattle out of the mist.'] };
+  const tileAt = u => b.grid[u.y * W + u.x];
+  async function preAttackMoment(att, def, ranged) {
+    const cm = COMPANY_MOMENT[att.type];
+    if (cm && !momentsShown.has(cm[0])) return extraMoment(cm[0], cm[1], cm[2], '#ffc070');
+    if (b.siege && att.side === 'defender') {
+      const tl = tileAt(att);
+      if (ranged && (tl === 'wall' || tl === 'keep')) return extraMoment('wallArchers', 'Death from the Walls', `${S.defender.full} shoots down from the battlements.`);
+      if (!ranged && (tl === 'wall' || tl === 'gate')) return extraMoment('boilingOil', 'Boiling Oil', 'The gatehouse answers the assault.', '#ff9a50');
+      if (!ranged && att.x >= 11 && def.x < 11) return extraMoment('sally', 'Sally!', `${S.defender.full} bursts out of the gate.`);
+    }
+    if (!ranged && MOUNTED.has(att.type) && (def.type === 'pikes' || def.type === 'footmen') && !momentsShown.has('shieldWall') && Math.random() < 0.5)
+      return extraMoment('shieldWall', 'Hold the Line!', `${unitName(def)} braces for the charge.`);
+    if (!ranged && MOUNTED.has(att.type) && att.y !== def.y && att.x === def.x) return extraMoment('flank', 'Flank Attack', `${unitName(att)} strikes from the side.`);
+  }
+
   async function attackSequence(att, def, hit, counter, routed, counterRouted) {
+    await preAttackMoment(att, def, hit.ranged);
     const dA = view.disp.get(att.id), dD = view.disp.get(def.id);
     const ranged = hit.ranged, cs = view.cs;
     const before = { att: att.soldiers + (counter ? counter.killed : 0), def: def.soldiers + hit.killed };
@@ -1340,6 +1404,13 @@ export async function runBattle(container, input, opts = {}) {
         shakeBy(4);
         await tween(180, k => { dD.lunge.p = 0.5 + k * 0.5; dA.flash = 1 - k; });
         dD.lunge = null; dD.act = null;
+      }
+    }
+    // rally: a led unit drops below half strength and holds
+    for (const u of [def, att]) {
+      if (!u.out && vassalOf(u) && !isRuler(u) && u.soldiers < u.start * 0.5 && u.soldiers > u.start * 0.32) {
+        await extraMoment('rally', 'Rally!', `${unitName(u)}: "${bark(vassalOf(u), 'attack', view.now | 0)}"`, '#ffe08a');
+        break;
       }
     }
     // last stand: a ruler's unit falls low
@@ -1472,6 +1543,8 @@ export async function runBattle(container, input, opts = {}) {
     const winSide = b.winner;
     const winner = liveUnits(b, winSide).sort((p, q) => q.soldiers - p.soldiers)[0] || b.units.find(u => u.side === winSide);
     if (reason === 'keep taken') await momentCutin(BATTLE_MOMENT.keepTaken, 'The Keep Is Taken!', `${S.attacker.full} raises its banner over ${province ? province.name : 'the keep'}.`, '#ffd27a');
+    else if (reason === 'attackers routed' && artImg(BATTLE_MOMENT2.retreat) && cutMode() !== 'off') await momentCutin(BATTLE_MOMENT2.retreat, 'Retreat!', `${S.attacker.full} falls back across the field.`, '#ffc070');
+    else if (reason === 'defenders routed' && artImg(BATTLE_MOMENT2.banner) && cutMode() !== 'off') await momentCutin(BATTLE_MOMENT2.banner, 'The Field Is Won', `${S.attacker.full} raises the captured banners.`, '#ffd27a');
     else if (reason === 'defenders routed' || reason === 'attackers routed') await momentCutin(BATTLE_MOMENT.rout, 'The Field Is Won', `${S[enemyOf(winSide)].full} flees in disorder.`, '#ffd27a');
     if (winner) showBark(winner, 'win');
     const playerWon = playerSide ? winSide === playerSide : null;
@@ -1480,6 +1553,7 @@ export async function runBattle(container, input, opts = {}) {
     modal.hidden = false;
     modal.innerHTML = '';
     const box = el('div', 'bt-result');
+    if (artImg(BATTLE_MOMENT2.aftermath)) { box.classList.add('bt-result-art'); box.style.backgroundImage = `linear-gradient(rgba(14,10,16,0.78), rgba(14,10,16,0.93)), url("${art(BATTLE_MOMENT2.aftermath)}")`; }
     const title = playerWon == null ? `${S[winSide].full} wins` : playerWon ? 'Victory' : 'Defeat';
     const REASON = { 'keep taken': 'The keep was taken.', 'held out': `The defenders held out for ${MAX_ROUNDS} rounds.`, 'attackers routed': 'The attackers were routed.',
       'defenders routed': 'The defenders were routed.', 'attackers withdrew': 'The attackers withdrew.', 'defenders fled': 'The defenders fled.', 'no attackers': 'No one came to fight.', 'no defenders': 'The province was undefended.' };
@@ -1670,8 +1744,9 @@ export async function runBattle(container, input, opts = {}) {
     modal.hidden = false;
     modal.innerHTML = '';
     const box = el('div', 'bt-intro');
-    const bgIm = artImg(BATTLE_MOMENT.intro);
-    if (bgIm) box.style.backgroundImage = `linear-gradient(rgba(10,8,14,0.35), rgba(10,8,14,0.75)), url("${art(BATTLE_MOMENT.intro)}")`;
+    const introSlot = artImg(HOUSE_CHARGE[b.houses.attacker]) ? HOUSE_CHARGE[b.houses.attacker] : BATTLE_MOMENT.intro;
+    const bgIm = artImg(introSlot);
+    if (bgIm) box.style.backgroundImage = `linear-gradient(rgba(10,8,14,0.30), rgba(10,8,14,0.78)), url("${art(introSlot)}")`;
     const leader = side => {
       const us = b.units.filter(u => u.side === side);
       return us.find(isRuler) || us.filter(u => u.vassalId).sort((p, q) => q.soldiers - p.soldiers)[0] || us.find(u => !isSpirit(u)) || us[0];
@@ -1716,6 +1791,7 @@ export async function runBattle(container, input, opts = {}) {
       const su = spiritOf(b, side);
       if (su && !su.out && b.round === 1 && b.side === 'attacker' && !b.spiritUsed[side]) await spiritCutin(side, su.type, true);
     }
+    if (spiritOf(b, 'attacker') && spiritOf(b, 'defender')) await extraMoment('spiritClash', 'Spirits Collide', 'The sky itself takes sides.', '#c9a0ff');
     const L = leader('attacker');
     if (L) showBark(L, 'start');
   }

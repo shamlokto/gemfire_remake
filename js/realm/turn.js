@@ -28,6 +28,7 @@ import {
 // A vassal on the losing side with no surviving unit is captured with this chance.
 export const UNITLESS_CAPTURE = 0.4;
 import { applyOrder, resetOrders, moveVassal } from './orders.js';
+import { betaTopUp } from './state.js';
 import { monthlyTick } from './economy.js';
 import { planHouseOrders } from './ai.js';
 import { defect, joinHouse } from './diplomacy.js';
@@ -253,10 +254,11 @@ export function applyBattleResult(state, march, input, result) {
       const remain = [...result.attacker.units, ...result.defender.units].reduce((a, u) => a + Math.max(0, u.soldiers), 0);
       const intensity = total ? Math.min(1, (total - remain) / total * (input.siege ? 1.4 : 1) + (input.siege ? 0.1 : 0)) : 0;
       const dmg = warDamage(state, pr.id, intensity, rng);
+      pr.takenTurn = state.turn;   // the land view shows the raid banner
       if (dmg && (dmg.damaged || dmg.razed)) addLog(state, `${where} is scarred by the fighting: ${dmg.damaged} buildings damaged, ${dmg.razed} razed.`, 'battle');
       if (state.land) {
         if (isPlayerControlled(state, atkHouse)) {
-          state.pendingEvents.push({ kind: 'loot', province: pr.id, art: STORY.siege.art, title: `${where} is yours`,
+          state.pendingEvents.push({ kind: 'loot', province: pr.id, art: 315 /* LAND_MOMENT.raid */, title: `${where} is yours`,
             text: `Your soldiers hold ${where}${landQuality(state, pr.id) ? ` (${landQuality(state, pr.id)} land)` : ''}. Sack it for gold now, or spare it and keep its people loyal?\nLooting fills your coffers but damages markets, houses and granaries, and loyalty falls by 25.` });
         } else if (aiWantsLoot(state, atkHouse, pr.id, rng)) {
           const r = applyLoot(state, pr.id, rng);
@@ -393,6 +395,7 @@ export async function endMonth(state, opts = {}) {
 
   summary.winner = state.winner;
   summary.defeated = state.defeated;
+  betaTopUp(state);
   return summary;
 }
 

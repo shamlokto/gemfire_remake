@@ -184,6 +184,7 @@ export function applyLoot(state, pid, rng) {
   }
   const r = landLoot(land, rng);
   pr.gold += r.gold;
+  pr.lootedTurn = state.turn;   // the land view shows the looted-town banner
   pr.loyalty = Math.max(0, pr.loyalty + r.loyalty);
   syncLegacy(state, pid);
   return r;

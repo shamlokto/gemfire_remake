@@ -5,6 +5,7 @@ import { RANDOM_EVENTS } from '../data/events.js';
 import { COMPANIES } from '../data/units.js';
 import { PROVINCES, seasonOf, NEUTRAL_MILITIA, ADJACENCY } from '../data/world.js';
 import { techEffect } from './tech.js';
+import { betaTopUp } from './state.js';
 import { monthTick as landTick } from '../land/land.js';
 import { landOf, yieldOf, syncLegacy, seedBankRegrow, eventDamage } from './landhooks.js';
 import {
@@ -89,6 +90,7 @@ function fireEvent(state, pr, ev, rng = null) {
 }
 
 export function monthlyTick(state, rng) {
+  betaTopUp(state);
   const s = seasonOf(state.month);
   const revolt = RANDOM_EVENTS.find(e => e.id === 'revolt');
   for (const pr of state.provinces) {
@@ -163,6 +165,7 @@ export function monthlyTick(state, rng) {
     }
   }
   for (const pr of state.provinces) syncLegacy(state, pr.id);
+  betaTopUp(state);
 }
 
 // Food eaten by a province's troops this month (Granaries cut it).

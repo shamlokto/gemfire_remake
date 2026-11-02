@@ -108,6 +108,15 @@ def tile(img, w, h):
     return Image.composite(img, off, mask)
 
 
+def border_opacity(img):
+    """Fraction of border pixels that stayed opaque after a cutout (a failed cutout keeps its scene)."""
+    a = img.getchannel('A')
+    w, h = img.size
+    pts = [(x, 0) for x in range(0, w, 8)] + [(x, h - 1) for x in range(0, w, 8)] + \
+          [(0, y) for y in range(0, h, 8)] + [(w - 1, y) for y in range(0, h, 8)]
+    return sum(1 for p in pts if a.getpixel(p) > 40) / len(pts)
+
+
 def process(path, slot):
     img = Image.open(path)
     img.load()
@@ -150,6 +159,15 @@ def main():
         slot = slots[n]
         out = process(path, slot)
         name = f'{n:03d}.webp'
+        if slot['mode'] == 'cutout' and border_opacity(out) > 0.2:
+            # The generator painted a full scene instead of a sprite on a flat background:
+            # leave the slot empty so the game keeps its drawn fallback.
+            manifest['slots'].pop(str(n), None)
+            stale = os.path.join(OUT, name)
+            if os.path.exists(stale):
+                os.remove(stale)
+            print(f'  {n:03d} SKIPPED: the background could not be cut out (regenerate this one)')
+            continue
         out.save(os.path.join(OUT, name), 'WEBP', quality=args.quality, method=6)
         manifest['slots'][str(n)] = name
         print(f'  {n:03d} {slot["kind"]:<9} {slot["mode"]:<6} {out.size[0]}x{out.size[1]}  <- {os.path.basename(path)}')

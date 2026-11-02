@@ -11,6 +11,55 @@ import {
   T, B, R, TERRAIN, RESOURCE, BUILDING, BUILD_KEYS, PROJECT, provinceYield, listBuildable, build,
   demolish, repair, neighbours4, neighbours8,
 } from '../land/land.js';
+import { art, hasArt, LAND_BUILDING, LAND_RESOURCE, LAND_PANORAMA, LAND_SKY } from '../data/art.js';
+
+// ---------------------------------------------------------------- painted art (optional)
+// Isometric sprites for buildings and resources, a panorama and a sky behind the board. Every
+// piece is optional: without it the procedural drawing below is used.
+const IMG = new Map();
+function artImage(slot, onload) {
+  if (!slot || !hasArt(slot)) return null;
+  let rec = IMG.get(slot);
+  if (!rec) {
+    rec = { img: new Image(), ready: false, bbox: null, snow: null };
+    rec.img.onload = () => { rec.ready = true; rec.bbox = alphaBox(rec.img); onload && onload(); };
+    rec.img.src = art(slot);
+    IMG.set(slot, rec);
+  }
+  return rec.ready ? rec : null;
+}
+// Bounding box of the opaque pixels of a cut-out sprite (so its diamond can sit on a board tile).
+function alphaBox(img) {
+  try {
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let x0 = c.width, y0 = c.height, x1 = 0, y1 = 0;
+    for (let y = 0; y < c.height; y += 2) for (let x = 0; x < c.width; x += 2) {
+      if (d[(y * c.width + x) * 4 + 3] > 60) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    return x1 > x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: c.width, h: c.height };
+  } catch { return { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight }; }
+}
+// Winter variant: the sprite dusted with snow (cached once).
+function snowy(rec) {
+  if (rec.snow) return rec.snow;
+  const c = document.createElement('canvas'); c.width = rec.img.naturalWidth; c.height = rec.img.naturalHeight;
+  const g = c.getContext('2d'); g.drawImage(rec.img, 0, 0);
+  g.globalCompositeOperation = 'source-atop';
+  const gr = g.createLinearGradient(0, 0, 0, c.height);
+  gr.addColorStop(0, 'rgba(240,246,250,0.55)'); gr.addColorStop(1, 'rgba(225,235,242,0.35)');
+  g.fillStyle = gr; g.fillRect(0, 0, c.width, c.height);
+  rec.snow = c;
+  return c;
+}
+const spriteFor = (key, res, terr) => {
+  if (key === 'orchard' && res === 4) return LAND_BUILDING.vineyard;          // R.VINES
+  if (key === 'mine' && !res && terr === 7) return LAND_BUILDING.quarry;        // bare rock: a quarry
+  if (key === 'fishery' && terr === 0 && hasArt(LAND_BUILDING.harbour)) return LAND_BUILDING.harbour;
+  return LAND_BUILDING[key];
+};
+const RES_KEY = ['', 'ore', 'salt', 'pearls', '', 'ruins', 'grove', 'springs'];
 
 const SEASON_NAMES = ['Spring', 'Summer', 'Autumn', 'Winter'];
 const seasonOf = m => Math.floor(((m ?? 4) % 12) / 3);
@@ -53,14 +102,16 @@ export function openLandView(container, land, opts = {}) {
         <button class="lv-btn lv-heat" title="Show soil fertility">Fertility</button>
       </div>
     </div>
-    <div class="lv-stage"><canvas class="lv-canvas"></canvas><div class="lv-tip" hidden></div></div>
+    <div class="lv-stage"><canvas class="lv-canvas"></canvas><div class="lv-tip" hidden></div><div class="lv-moment" hidden></div></div>
     <div class="lv-palette" hidden></div>`;
   const $ = s => container.querySelector(s);
   const canvas = $('.lv-canvas'), stage = $('.lv-stage'), tip = $('.lv-tip'), palette = $('.lv-palette');
   const g = canvas.getContext('2d');
   let dpr = 1, cw = 0, ch = 0, tw = 64, th = 32, ox = 0, oy = 0;
   let hover = -1, sel = -1, heat = false, alive = true, raf = 0, t0 = performance.now();
-  let agents = [], smoke = [], lastT = 0;
+  let agents = [], smoke = [], lastT = 0, px = 0, py = 0, artTick = 0;
+  const terrainKey = (opts.province && opts.province.terrain) || 'plains';
+  const onArt = () => { artTick++; groundCache = null; if (!palette.hidden && sel >= 0) openPalette(sel); };
 
   $('.lv-name').textContent = (opts.province && opts.province.name) || 'Province';
   $('.lv-heat').addEventListener('click', () => { heat = !heat; $('.lv-heat').classList.toggle('on', heat); });
@@ -97,16 +148,72 @@ export function openLandView(container, land, opts = {}) {
   function diamond(c, cx, cy, w = tw, h = th) {
     c.beginPath(); c.moveTo(cx, cy - h / 2); c.lineTo(cx + w / 2, cy); c.lineTo(cx, cy + h / 2); c.lineTo(cx - w / 2, cy); c.closePath();
   }
+  function backdropReady() {
+    return !!(artImage(LAND_PANORAMA[terrainKey], onArt) || artImage(LAND_SKY[seasonOf(ctx.month)], onArt));
+  }
+  const cover = (img, x, y, w, h, fx = 0.5, fy = 0.5) => {
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const k = Math.max(w / iw, h / ih), dw = iw * k, dh = ih * k;
+    g.drawImage(img, x + (w - dw) * fx, y + (h - dh) * fy, dw, dh);
+  };
+  // Painted backdrop: the season's sky behind, the province's terrain panorama in front, both with
+  // a gentle parallax that follows the pointer, then a dark vignette so the board stays readable.
+  function drawBackdrop(t) {
+    const season = seasonOf(ctx.month);
+    const sky = artImage(LAND_SKY[season], onArt), pano = artImage(LAND_PANORAMA[terrainKey], onArt);
+    if (!sky && !pano) return false;
+    g.save();
+    g.fillStyle = '#0d1110'; g.fillRect(0, 0, cw, ch);
+    const drift = Math.sin(t * 0.05) * 6;
+    if (sky) { g.globalAlpha = 1; cover(sky.img, -20 + px * -8 + drift, -20 + py * -5, cw + 40, ch * 0.75 + 40, 0.5, 0.3); }
+    if (pano) {
+      g.globalAlpha = sky ? 0.92 : 1;
+      const top = sky ? ch * 0.18 : 0;
+      cover(pano.img, -30 + px * -16, top - 10 + py * -8, cw + 60, ch - top + 20, 0.5, 0.6);
+      if (sky) {   // blend the panorama's top edge into the sky
+        const fade = g.createLinearGradient(0, top - 10, 0, top + ch * 0.18);
+        g.globalAlpha = 1;
+        fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,0)');
+      }
+    }
+    g.globalAlpha = 1;
+    if (season === 3) { g.fillStyle = 'rgba(210,225,240,0.18)'; g.fillRect(0, 0, cw, ch); }
+    const v = g.createRadialGradient(cw / 2, ch * 0.55, Math.min(cw, ch) * 0.25, cw / 2, ch * 0.55, Math.max(cw, ch) * 0.75);
+    v.addColorStop(0, 'rgba(8,10,8,0.15)'); v.addColorStop(1, 'rgba(8,10,8,0.78)');
+    g.fillStyle = v; g.fillRect(0, 0, cw, ch);
+    g.restore();
+    return true;
+  }
+  // Draw a painted iso sprite so its diamond sits on the board tile at (cx, cy).
+  function drawSprite(rec, cx, cy, season, scale = 1.04) {
+    const b = rec.bbox, src = season === 3 ? snowy(rec) : rec.img;
+    const k = (tw * scale) / b.w;
+    const dw = (rec.img.naturalWidth) * k, dh = (rec.img.naturalHeight) * k;
+    const bottom = cy + th / 2 + th * 0.06;                // the sprite's lowest opaque row on the tile's front vertex
+    const dx = cx - (b.x + b.w / 2) * k, dy = bottom - (b.y + b.h) * k;
+    g.drawImage(src, dx, dy, dw, dh);
+    return { top: dy + b.y * k, k };
+  }
+
   function drawGround() {
     const season = seasonOf(ctx.month);
-    const key = `${season}|${cw}|${ch}|${L.t.join('')}|${L.r.join('')}`;
+    const key = `${season}|${cw}|${ch}|${L.t.join('')}|${L.r.join('')}|${artTick}`;
     if (groundCache && groundKey === key) return groundCache;
     const cv = document.createElement('canvas'); cv.width = canvas.width; cv.height = canvas.height;
     const c = cv.getContext('2d'); c.scale(dpr, dpr);
-    // backdrop: sky-to-ground vignette
-    const bg = c.createRadialGradient(cw / 2, ch / 2, 10, cw / 2, ch / 2, Math.max(cw, ch) * 0.75);
-    bg.addColorStop(0, season === 3 ? '#26313b' : '#1d2a22'); bg.addColorStop(1, '#0d1110');
-    c.fillStyle = bg; c.fillRect(0, 0, cw, ch);
+    // backdrop: sky-to-ground vignette (only when no painted backdrop is drawn behind the board)
+    if (!backdropReady()) {
+      const bg = c.createRadialGradient(cw / 2, ch / 2, 10, cw / 2, ch / 2, Math.max(cw, ch) * 0.75);
+      bg.addColorStop(0, season === 3 ? '#26313b' : '#1d2a22'); bg.addColorStop(1, '#0d1110');
+      c.fillStyle = bg; c.fillRect(0, 0, cw, ch);
+    } else {
+      // soft shadow under the board
+      const [ax, ay] = iso(0, L.h), [bx, by] = iso(L.w, L.h);
+      const sh = c.createRadialGradient(bx, by, 10, bx, by, Math.max(cw, ch) * 0.6);
+      sh.addColorStop(0, 'rgba(0,0,0,0.45)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = sh; c.fillRect(0, 0, cw, ch);
+      void ax; void ay;
+    }
     // slab sides of the whole board
     const [ax, ay] = iso(0, L.h), [bx, by] = iso(L.w, L.h), [ex, ey] = iso(L.w, 0);
     c.fillStyle = '#3b2c1e'; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.lineTo(bx, by + th * 0.7); c.lineTo(ax, ay + th * 0.7); c.fill();
@@ -263,7 +370,12 @@ export function openLandView(container, land, opts = {}) {
       }
     }
     // resource markers
-    if (res) drawResource(res, cx, cy, t, season, x, y);
+    const resArt = res && !b ? artImage(LAND_RESOURCE[RES_KEY[res]], onArt) : null;
+    if (resArt) {
+      drawSprite(resArt, cx, cy, season, 1.0);
+      if (res === R.SPRINGS && Math.random() < 0.06) smoke.push({ x: cx, y: cy - th * 0.3, vx: 0, vy: -10, life: 0, max: 1.6, steam: true });
+      if (res === R.ORE && (t * 2) % 3 < 0.12) { g.fillStyle = '#fff'; g.fillRect(cx - 1, cy - th * 0.4, 2, 2); }
+    } else if (res) drawResource(res, cx, cy, t, season, x, y);
     if (b) drawBuilding(b, i, cx, cy, t, season, building, damaged, res);
     if (building) scaffold(cx, cy, L.c[i]);
     const pr = L.p.find(p => p.i === i);
@@ -334,8 +446,24 @@ export function openLandView(container, land, opts = {}) {
   function drawBuilding(b, i, cx, cy, t, season, building, damaged, res) {
     const roof = houseColor, stone = '#d8cdb5', wood = '#8a6440';
     const dim = building ? 0.45 : 1;
-    g.globalAlpha = dim;
     const x = i % L.w, y = (i / L.w) | 0;
+    if (b !== B.FARM) {
+      const key = BUILDING[b].key;
+      const rec = artImage(damaged && hasArt(LAND_BUILDING.ruin) ? LAND_BUILDING.ruin : spriteFor(key, res, L.t[i]), onArt);
+      if (rec) {
+        g.globalAlpha = dim;
+        const sc = b === B.KEEP ? 1.18 : b === B.WALLS ? 0.98 : b === B.HOUSES || b === B.MARKET ? 1.08 : 1.02;
+        const r = drawSprite(rec, cx, cy, season, sc);
+        g.globalAlpha = 1;
+        // living touches on top of the painting
+        if (!building && !damaged) {
+          if ((b === B.HOUSES || b === B.KEEP || b === B.BARRACKS) && Math.random() < 0.02 + (season === 3 ? 0.03 : 0)) puff(cx + (hash(x, y, 9) - 0.5) * tw * 0.3, r.top + th * 0.3, false);
+          if (b === B.KEEP || b === B.BARRACKS || b === B.TEMPLE) flag(cx + tw * 0.18, Math.max(r.top + th * 0.15, cy - th * 1.6), t, roof);
+        }
+        return;
+      }
+    }
+    g.globalAlpha = dim;
     switch (b) {
       case B.FARM: {
         // crop rows by season
@@ -538,6 +666,8 @@ export function openLandView(container, land, opts = {}) {
     if (!alive) return;
     const t = (now - t0) / 1000, dt = Math.min(0.05, t - lastT); lastT = t;
     const season = seasonOf(ctx.month);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawBackdrop(t);
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.drawImage(drawGround(), 0, 0);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -631,10 +761,15 @@ export function openLandView(container, land, opts = {}) {
     }
     const good = opts2.filter(o => o.ok), bad = opts2.filter(o => !o.ok && !o.project);
     if (good.length) {
-      html += `<div class="lv-pal-grid">` + good.map(o => `<button class="lv-opt" data-kind="${o.kind}">
-        <span class="lv-ico">${BUILDING_ICON[o.kind] || '•'}</span><span class="lv-opt-name">${o.name}</span>
-        <span class="lv-opt-cost">${o.cost} gold · ${o.time} mo</span>
-        <span class="lv-opt-prev">${prev(o.preview) || (o.project ? o.text : '')}</span></button>`).join('') + `</div>`;
+      const terr = L.t[i];
+      html += `<div class="lv-pal-grid">` + good.map(o => {
+        const slot = o.project ? null : spriteFor(o.kind, L.r[i], terr);
+        const pic = slot && hasArt(slot) ? `<img class="lv-card-img" src="${art(slot)}" alt="">` : `<span class="lv-ico">${BUILDING_ICON[o.kind] || '•'}</span>`;
+        return `<button class="lv-opt lv-card" data-kind="${o.kind}">
+        <span class="lv-card-pic">${pic}</span><span class="lv-opt-name">${o.name}</span>
+        <span class="lv-opt-cost">${ctx.free ? `<s>${o.cost}</s> free` : `${o.cost} gold`} · ${o.time} mo</span>
+        <span class="lv-opt-prev">${prev(o.preview) || (o.project ? o.text : '')}</span></button>`;
+      }).join('') + `</div>`;
     } else if (!readOnly && !b) html += `<p class="lv-dim">Nothing can be built here.</p>`;
     if (bad.length && !b) html += `<details class="lv-why"><summary>Not here (${bad.length})</summary>${bad.map(o => `<div>${o.name}: ${o.why}</div>`).join('')}</details>`;
     palette.innerHTML = html; palette.hidden = false;
@@ -666,6 +801,7 @@ export function openLandView(container, land, opts = {}) {
   function pos(e) { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
   canvas.addEventListener('pointermove', e => {
     const [mx, my] = pos(e);
+    px = (mx / cw - 0.5) * 2; py = (my / ch - 0.5) * 2;
     hover = pick(mx, my);
     if (hover >= 0 && e.pointerType === 'mouse') {
       tip.innerHTML = tileInfo(hover); tip.hidden = false;
@@ -681,7 +817,22 @@ export function openLandView(container, land, opts = {}) {
   layout(); renderHud();
   raf = requestAnimationFrame(frame);
 
+  // A painted banner across the top of the board (harvest, a raid, a project...): { slot, title, text }.
+  let momentTimer = 0;
+  function showMoment(m) {
+    const el = container.querySelector('.lv-moment');
+    if (!m || !el) return;
+    const pic = m.slot && hasArt(m.slot) ? `style="background-image:url(${art(m.slot)})"` : '';
+    el.innerHTML = `<div class="lv-moment-pic" ${pic}></div><div class="lv-moment-txt"><b>${m.title || ''}</b><span>${m.text || ''}</span></div><button class="lv-btn lv-moment-x" aria-label="Dismiss">✕</button>`;
+    el.hidden = false; el.classList.remove('out');
+    el.querySelector('.lv-moment-x').onclick = () => { el.hidden = true; };
+    clearTimeout(momentTimer);
+    momentTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.hidden = true; }, 600); }, m.ms || 5500);
+  }
+  if (opts.moment) setTimeout(() => showMoment(opts.moment), 250);
+
   return {
+    showMoment,
     update(newLand, newCtx) { if (newLand) L = newLand; if (newCtx) ctx = { ...ctx, ...newCtx }; groundCache = null; renderHud(); if (sel >= 0 && !palette.hidden) openPalette(sel); },
     setMonth(m) { ctx.month = m; groundCache = null; renderHud(); },
     get land() { return L; },

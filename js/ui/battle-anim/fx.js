@@ -41,6 +41,11 @@ export const reducedMotion = () => {
   try { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 };
 
+// Optional painted effect sprites (on black, drawn with 'screen' blending): explosion, smoke, dust,
+// sparks, shockwave. Set by the battle view once the art is loaded; effects work without them.
+let FX_IMG = {};
+export function setFxImages(map) { FX_IMG = map || {}; }
+
 export class Particles {
   constructor(opts = {}) {
     this.list = [];
@@ -111,11 +116,19 @@ export class Particles {
   snowPuff(x, y, n) { this.dust(x, y, n, [235, 242, 252], 0.22); }
   streak(x, y, vx, vy, col, life = 0.25, w = 1) { this.add({ k: 'spark', x, y, vx, vy, g: 0, drag: 1, life, max: life, col: hexRgb(col), w }); }
 
+  // A painted effect sprite: grows, spins a little and fades.
+  sprite(name, x, y, r, life = 0.6, grow = 1.2, alpha = 1) {
+    const img = FX_IMG[name];
+    if (!img) return null;
+    return this.add({ k: 'img', img, x, y, r: r * this.unit, grow: grow * r * this.unit, rot: this.rnd() * TAU, vr: (this.rnd() - 0.5) * 1.2, life, max: life, alpha });
+  }
+
   // ---- composite effects
   // A melee contact: sparks and a little flash; heavier with `power` (0..1).
   clash(x, y, power = 0.5, col = [255, 210, 140]) {
     this.flash(x, y, 0.35 + power * 0.4, mix(hexRgb(col), [255, 255, 255], 0.5));
     this.sparks(x, y, 8 + power * 18, col, 3 + power * 3);
+    if (power > 0.3) this.sprite('sparks', x, y, 0.3 + power * 0.35, 0.35, 0.8, 0.85);
   }
   // A shot landing: small flash, sparks, dust.
   hit(x, y, col = [240, 225, 190]) {
@@ -133,6 +146,9 @@ export class Particles {
     this.debris(x, y, Math.round(8 * size), [110, 95, 80], 3.5 * size);
     this.embers(x, y, Math.round(10 * size), c, 0.8 * size);
     this.smoke(x, y - 0.1 * this.unit, Math.round(5 * size), 0.5 * size, 50, 0.15);
+    this.sprite('explosion', x, y - 0.1 * this.unit, 0.75 * size, 0.55, 0.9);
+    this.sprite('shockwave', x, y, 0.5 * size, 0.45, 3.2, 0.8);
+    this.sprite('smoke', x, y - 0.25 * this.unit, 0.6 * size, 1.4, 0.7, 0.5);
   }
   // A unit destroyed / routed on the board: banner-coloured burst plus smoke and dust.
   unitBurst(x, y, col, dead = false) {
@@ -144,6 +160,8 @@ export class Particles {
     this.smoke(x, y, dead ? 6 : 3, 0.45, 60);
     this.dust(x, y + 0.3 * this.unit, 5);
     if (dead) this.debris(x, y, 6, [100, 85, 70], 3);
+    this.sprite('dust', x, y + 0.15 * this.unit, 0.6, 1.1, 0.9, 0.7);
+    if (dead) this.sprite('shockwave', x, y, 0.35, 0.4, 3, 0.7);
   }
 
   step(dt) {
@@ -188,6 +206,15 @@ export class Particles {
         g.fillStyle = `rgb(${p.col[0]},${p.col[1]},${p.col[2]})`; const r = p.r * S;
         g.beginPath(); g.ellipse(0, 0, r, r * 0.45, 0, 0, TAU); g.fill(); g.restore();
       }
+    }
+    // painted effect sprites (images on black) with screen blending
+    g.globalCompositeOperation = 'screen';
+    for (const p of L) {
+      if (p.k !== 'img' || p.delay > 0) continue;
+      const a = clamp(p.life / p.max, 0, 1);
+      const X = ox + p.x * S, Y = oy + p.y * S, r = p.r * S;
+      g.globalAlpha = (p.alpha ?? 1) * Math.min(1, a * 1.6) * Math.min(1, (p.max - p.life) * 12);
+      g.save(); g.translate(X, Y); g.rotate(p.rot); g.drawImage(p.img, -r, -r, r * 2, r * 2); g.restore();
     }
     g.globalCompositeOperation = 'lighter';
     for (const p of L) {

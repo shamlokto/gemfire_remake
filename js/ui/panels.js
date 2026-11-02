@@ -6,7 +6,7 @@ import { HOUSES, HOUSE_BY_ID } from '../data/houses.js';
 import { VASSAL_BY_ID } from '../data/vassals.js';
 import { TROOPS, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, MAX_UNITS_PER_ARMY } from '../data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
-import { art, PROVINCE_VIGNETTE, ORDER_BACKDROP } from '../data/art.js';
+import { art, hasArt, PROVINCE_VIGNETTE, ORDER_BACKDROP, LAND_MOMENT, LAND_PANORAMA } from '../data/art.js';
 import {
   provinceVassals, governorOf, houseTotals, canSee, captivesOf, atPeace, pairKey, provinceDefence,
   ownedProvinces, envoyOf, troopPower, companyPower, spiritPower, leaderOf, unitName, wanderersAt, wanderersNear,
@@ -105,11 +105,12 @@ export class RealmUI {
     this.top.append(
       h('div.season-banner', { style: { backgroundImage: `url(${art(SEASON_BANNER[season])})` } }),
       h('div.date', h('span.m', MONTHS[st.month]), h('span.y', `${SEASONS[season]}, year ${st.year}`)),
-      h('div.house-tag', { '--hc': houseColor(st.player) }, crestImg(st.player, 30), h('span.n', house.short)),
+      h('div.house-tag', { '--hc': houseColor(st.player) }, crestImg(st.player, 30), h('span.n', house.short),
+        st.beta?.gold ? h('span.beta-badge', { title: 'Beta tester: unlimited gold' + (st.beta.food ? ' and food' : '') + '. Change it in the menu.', onclick: () => this.app.openBeta && this.app.openBeta() }, 'Beta') : null),
       h('div.totals',
         h('span', { title: 'Provinces' }, h('i', '🏰'), t.provinces),
-        h('span', { title: 'Gold (all provinces)' }, h('i', '🪙'), fmt(t.gold)),
-        h('span', { title: 'Food (all provinces)' }, h('i', '🌾'), fmt(t.food)),
+        h('span', { title: st.beta?.gold ? 'Gold: unlimited (beta tester)' : 'Gold (all provinces)' }, h('i', '🪙'), st.beta?.gold ? '∞' : fmt(t.gold)),
+        h('span', { title: st.beta?.food ? 'Food: unlimited (beta tester)' : 'Food (all provinces)' }, h('i', '🌾'), st.beta?.food ? '∞' : fmt(t.food)),
         h('span', { title: 'Soldiers' }, h('i', '⚔'), fmt(t.soldiers)),
         shardStatus(st, st.player).length ? shardStatus(st, st.player).map(x => chargeMeter(x, true)) : h('span', { title: 'Lantern Shards' }, h('i', '◆'), 0)),
       h('div.top-actions',
@@ -163,7 +164,8 @@ export class RealmUI {
     const frag = h('div');
     const hasLand = !!landOf(st, pid);
     const landSeen = hasLand && (mine || seen);
-    frag.append(h('div.prov-vignette', { style: { margin: '-14px -14px 10px', height: '120px', position: 'relative', backgroundImage: `url(${art(PROVINCE_VIGNETTE(pid))})`, backgroundSize: 'cover', backgroundPosition: 'center' } },
+    const vig = hasArt(PROVINCE_VIGNETTE(pid)) ? PROVINCE_VIGNETTE(pid) : hasArt(LAND_PANORAMA[P.terrain]) ? LAND_PANORAMA[P.terrain] : PROVINCE_VIGNETTE(pid);
+    frag.append(h('div.prov-vignette', { style: { margin: '-14px -14px 10px', height: '120px', position: 'relative', backgroundImage: `url(${art(vig)})`, backgroundSize: 'cover', backgroundPosition: 'center' } },
       h('div.vig-fade'),
       landSeen ? h('button.btn.land-btn' + (mine ? '.primary' : ''), { title: mine ? 'Open the land: build farms, houses, markets…' : 'View this land',
         onclick: () => { sfx('click'); this.openLand(pid); } }, mine ? '⚒ Land' : '👁 Land') : null,
@@ -290,7 +292,7 @@ export class RealmUI {
     const note = () => {
       status.textContent = !mine ? `${HOUSE_BY_ID[pr.owner]?.name || 'A free hold'}'s land: you can look, not build.` :
         pr.ordered ? 'This province has acted this month: new building waits for next month.' :
-        `Click a tile to build. One building or project a month · ${fmt(pr.gold)} gold here.`;
+        `Click a tile to build. One building or project a month · ${st.beta?.gold ? 'unlimited gold (beta tester)' : fmt(pr.gold) + ' gold here'}.`;
     };
     wrap.append(h('div.land-bar', h('h2', `${PROVINCES[pid].name}`, landQuality(st, pid) ? h('span.land-quality.q-' + landQuality(st, pid), landQuality(st, pid)) : null), status,
       mine ? h('button.btn', { onclick: () => { sfx('click'); close(); this.app.apply({ type: 'build', province: pid, kind: 'dikes' }); }, title: 'Raise the dikes against floods (30 gold, uses the month)' }, `Dikes ${pr.dikes}`) : null,
@@ -299,10 +301,12 @@ export class RealmUI {
     document.addEventListener('keydown', onKey);
     const view = openLandView(box, land, {
       province: PROVINCES[pid], house: pr.owner ? HOUSE_BY_ID[pr.owner] : null,
-      ctx: { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) } }, readOnly: !mine || pr.ordered,
+      ctx: { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold }, readOnly: !mine || pr.ordered,
+      moment: this.landMoment(pid, land),
       onBuild: ({ x, y, kind }) => {
         const r = this.app.apply({ type: 'build', province: pid, x, y, kind });
-        view.update(land, { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) } });
+        view.update(land, { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold });
+        if (r.ok) view.showMoment({ slot: LAND_MOMENT.building, title: 'Work begins', text: r.msg, ms: 1800 });
         note();
         if (r.ok) setTimeout(close, 900);
         return r;
@@ -310,6 +314,29 @@ export class RealmUI {
     });
     view.setMonth(st.month);
     note();
+  }
+
+  // The painted banner shown when a land view opens: the most notable thing about this land right
+  // now (a sack, war damage, a project, the harvest, construction), each shown once per month.
+  landMoment(pid, land) {
+    const st = this.state, pr = st.provinces[pid], name = PROVINCES[pid].name;
+    this.momentsSeen = this.momentsSeen || new Set();
+    const damaged = land.d.filter(Boolean).length, building = land.c.filter(c => c > 0).length;
+    const proj = land.p.find(p => p.kind === 'drain' || p.kind === 'clear');
+    const q = landQuality(st, pid);
+    let m = null;
+    if (pr.lootedTurn != null && pr.lootedTurn >= st.turn - 1) m = { k: 'loot', slot: LAND_MOMENT.loot, title: 'A sacked town', text: `${name} was looted. Repair the markets and houses to bring it back.` };
+    else if (pr.takenTurn != null && pr.takenTurn >= st.turn - 2 && damaged) m = { k: 'raid', slot: LAND_MOMENT.raid, title: 'Scars of war', text: `${damaged} building${damaged > 1 ? 's' : ''} damaged in the fighting. Click one to repair it.` };
+    else if (proj) m = { k: proj.kind, slot: LAND_MOMENT[proj.kind], title: proj.kind === 'drain' ? 'Draining the marsh' : 'Clearing the forest', text: `${proj.left} month${proj.left > 1 ? 's' : ''} of work left.` };
+    else if (st.month === 6) m = { k: 'harvest', slot: LAND_MOMENT.harvest, title: 'Harvest', text: `The fields of ${name} are gathered in this month.` };
+    else if (building) m = { k: 'building', slot: LAND_MOMENT.building, title: 'Builders at work', text: `${building} building${building > 1 ? 's' : ''} under construction.` };
+    else if (q === 'breadbasket') m = { k: 'q', slot: LAND_MOMENT.breadbasket, title: 'A breadbasket', text: `${name} is some of the richest farmland in Varenhold.` };
+    else if (q === 'barren') m = { k: 'q', slot: LAND_MOMENT.barren, title: 'Hard country', text: `${name} grows little. Look to its mines, springs and pastures.` };
+    if (!m) return null;
+    const key = `${pid}|${st.turn}|${m.k}`;
+    if (this.momentsSeen.has(key) || (m.k === 'q' && this.momentsSeen.has(`${pid}|q`))) return null;
+    this.momentsSeen.add(key); if (m.k === 'q') this.momentsSeen.add(`${pid}|q`);
+    return m;
   }
 
   dlg_develop(pid) {

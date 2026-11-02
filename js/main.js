@@ -7,7 +7,7 @@ import { TROOPS, COMPANIES } from './data/units.js';
 import { STORY } from './data/events.js';
 import { SCENARIOS, SCENARIO_BY_ID } from './data/scenarios.js';
 import { art, loadArtManifest, ENDING, BATTLE_BACKDROP, ORDER_BACKDROP } from './data/art.js';
-import { newGame, ownedProvinces, houseTotals, withRng } from './realm/state.js';
+import { newGame, ownedProvinces, houseTotals, withRng, setBeta, betaTopUp } from './realm/state.js';
 import { applyLoot } from './realm/landhooks.js';
 import { applyOrder } from './realm/orders.js';
 import { endMonth } from './realm/turn.js';
@@ -75,7 +75,7 @@ const app = {
           if (choice === 'loot' && st.provinces[ev.province].owner === st.player) {
             const r = withRng(st, rng => applyLoot(st, ev.province, rng));
             sfx('coin');
-            toast(`Your soldiers carry off ${r.gold} gold. The people will not forget.`);
+            await eventCard({ art: 316, title: 'Sacked', text: `Your soldiers carry off ${r.gold} gold from ${PROVINCES[ev.province].name}. Markets, houses and granaries lie in ruin, and the people will not forget.` });
           }
           continue;
         }
@@ -145,6 +145,7 @@ const app = {
   },
 
   openSettings() { openSettings(); },
+  openBeta() { openBeta(); },
   openMenu() { openMenu(); },
 };
 
@@ -212,6 +213,25 @@ function saveLoadDialog(mode) {
   });
 }
 
+// ------------------------------------------------------------------ beta tester mode
+// Like the Earth Light expansion's beta switch: on by default for new games, remembered per browser.
+const BETA_PREF = 'lanternfall.beta';
+function betaPref() {
+  try { const v = JSON.parse(localStorage.getItem(BETA_PREF) || 'null'); if (v && typeof v === 'object') return { gold: !!v.gold, food: !!v.food }; } catch { /* storage blocked */ }
+  return { gold: true, food: true };
+}
+function saveBetaPref(v) { try { localStorage.setItem(BETA_PREF, JSON.stringify(v)); } catch { /* storage blocked */ } }
+function betaToggles(get, set) {
+  const v = get();
+  const g = h('input', { type: 'checkbox', checked: v.gold });
+  const f = h('input', { type: 'checkbox', checked: v.food, disabled: !v.gold });
+  g.addEventListener('change', () => { f.disabled = !g.checked; if (!g.checked) f.checked = false; else if (!get().gold) f.checked = true; set({ gold: g.checked, food: g.checked && f.checked }); });
+  f.addEventListener('change', () => set({ gold: g.checked, food: g.checked && f.checked }));
+  return h('div.beta-box',
+    h('label.beta-row', g, h('span', h('b', 'Beta tester'), ' — unlimited gold for your house: muster, build, hire and research freely.')),
+    h('label.beta-row.sub', f, h('span', 'Unlimited food too')));
+}
+
 // ------------------------------------------------------------------ menus
 function openMenu() {
   modal(close => ({
@@ -220,9 +240,20 @@ function openMenu() {
       h('button.btn', { onclick: async () => { close(); await saveLoadDialog('save'); } }, 'Save game'),
       h('button.btn', { onclick: async () => { close(); const s = await saveLoadDialog('load'); if (s) startGame(s); } }, 'Load game'),
       h('button.btn', { onclick: () => { close(); openSettings(); } }, 'Sound settings'),
+      h('button.btn', { onclick: () => { close(); openBeta(); } }, 'Beta tester…'),
       h('a.btn', { href: 'wiki.html', target: '_blank', rel: 'noopener', style: { textAlign: 'center', textDecoration: 'none' } }, 'Open the wiki'),
       h('button.btn', { onclick: async () => { close(); if (await confirmBox('Quit to title?', 'Your progress is autosaved each month.')) toTitle(); } }, 'Quit to title')),
     foot: [h('button.btn.primary', { onclick: () => close() }, 'Resume')],
+  }));
+}
+
+function openBeta() {
+  const st = app.state;
+  modal(close => ({
+    title: 'Beta tester',
+    body: [h('p.hint', 'For a breezy playthrough: your treasury (and granaries) never run dry. Costs are still shown. Computer houses play by the normal rules.'),
+      betaToggles(() => ({ gold: !!st.beta?.gold, food: !!st.beta?.food }), v => { setBeta(st, v.gold, v.food); saveBetaPref(v); app.refresh(); })],
+    foot: [h('button.btn.primary', { onclick: () => close() }, 'Done')],
   }));
 }
 
@@ -282,6 +313,7 @@ function buildScenarios() {
   }
   scr.append(h('div.bgimg', { style: { backgroundImage: `url(${art(2)})` } }),
     h('div.select-inner', h('h2', 'Choose a scenario'), h('p.sub', 'The same realm at different moments of the war.'), grid,
+      betaToggles(betaPref, saveBetaPref),
       h('div.select-actions', h('button.btn', { onclick: () => toTitle() }, 'Back'))));
 }
 
@@ -307,6 +339,7 @@ function buildSelect(scenarioId = 'eclipse') {
   }
   scr.append(h('div.bgimg', { style: { backgroundImage: `url(${art(2)})` } }),
     h('div.select-inner', h('h2', 'Choose your house'), h('p.sub', `${sc.name}, year ${sc.year}. ${sc.id === 'eclipse' ? 'Each house begins with two provinces and its own strengths.' : sc.difficulty}`), grid,
+      betaToggles(betaPref, saveBetaPref),
       h('div.select-actions', h('button.btn', { onclick: () => { buildScenarios(); app.show('scenario'); } }, 'Back'))));
 }
 
@@ -314,6 +347,8 @@ async function chooseHouse(id, scenarioId = 'eclipse') {
   sfx('click');
   const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
   const st = newGame(id, seed, scenarioId);
+  const b = betaPref();
+  if (b.gold) setBeta(st, true, b.food);
   startGame(st);
 }
 

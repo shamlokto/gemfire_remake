@@ -348,3 +348,25 @@ export function stateHash(state) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0).toString(16).padStart(8, '0');
 }
+
+// Beta tester mode (state.beta = { gold, food }): for the player's house only, gold (and food)
+// never run out. Costs are still charged and shown; the treasury is simply topped back up to a
+// large floor before every order, after the monthly tick and at the end of each month. AI houses
+// are never affected.
+export const BETA_GOLD = 9999, BETA_FOOD = 9999;
+export function isFree(state, house, kind = 'gold') {
+  return !!(state && state.beta && state.beta[kind] && house && house === state.player);
+}
+export function betaTopUp(state) {
+  const b = state && state.beta;
+  if (!b || !(b.gold || b.food)) return;
+  for (const pr of state.provinces) {
+    if (pr.owner !== state.player) continue;
+    if (b.gold && pr.gold < BETA_GOLD) pr.gold = BETA_GOLD;
+    if (b.food && pr.food < BETA_FOOD) pr.food = BETA_FOOD;
+  }
+}
+export function setBeta(state, on, food = on) {
+  state.beta = on ? { gold: true, food: !!food } : null;
+  betaTopUp(state);
+}

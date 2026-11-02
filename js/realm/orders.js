@@ -37,6 +37,7 @@ import { techEffect, hasTech, studyPoints, addResearch, techState, nextInBranch,
 import { companyDiscount } from './economy.js';
 import { TECH_BY_ID, BRANCHES } from '../data/tech.js';
 import { landOf, yieldOf, applyBuild, cheapestBuild, aiBuild } from './landhooks.js';
+import { betaTopUp } from './state.js';
 
 export const DEVELOP_COST = 30;
 export const SPY_COST = 20;
@@ -75,6 +76,7 @@ export function hireCost(state, house, type) {
 }
 // Every company with its price and why it cannot be hired here (null if it can).
 export function hireOptions(state, pid) {
+  betaTopUp(state);
   const pr = state.provinces[pid];
   return Object.entries(COMPANIES).map(([type, c]) => {
     const cost = hireCost(state, pr.owner, type);
@@ -90,6 +92,7 @@ export const recruitChance = (envoy, captive) =>
 // Order availability for the UI: [{ type, label, cost, disabled: reason|null }].
 // 'assign' is a free action and is not listed (use assignLeader / applyOrder type 'assign').
 export function listOrders(state, pid) {
+  betaTopUp(state);
   const pr = state.provinces[pid];
   const house = pr.owner;
   const out = [];
@@ -136,6 +139,7 @@ export function listOrders(state, pid) {
 //   targets: { attack: [pid], transfer: [pid], seaLanes: [pid] }   (seaLanes: reached by sea)
 //   maxUnits, needsVassalToAttack: true
 export function marchOptions(state, pid) {
+  betaTopUp(state);
   const pr = state.provinces[pid];
   const house = pr.owner;
   const units = pr.units.filter(u => u.soldiers > 0).map(u => ({
@@ -168,6 +172,7 @@ export function marchOptions(state, pid) {
 //   units:  [{ uid, type, name, soldiers, room }]   existing units that can grow
 //   canRaise: whether a new unit fits; maxSoldiers; gold
 export function musterOptions(state, pid) {
+  betaTopUp(state);
   const pr = state.provinces[pid];
   return {
     types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: musterCost(t, 10, state, pr.owner, pid) })),
@@ -206,6 +211,7 @@ export function assignLeader(state, pid, uid, vid) {
 
 export function applyOrder(state, order) {
   if (state.winner || state.defeated) return fail('The game is over.');
+  betaTopUp(state);
   const pid = order.province ?? order.from;
   const pr = state.provinces[pid];
   if (!pr) return fail('No such province.');
