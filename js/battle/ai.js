@@ -7,7 +7,7 @@
 
 import {
   W, OBJ, statsOf, reachable, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
-  dist, getUnit, canCast, spellCells, unitAt, ROUT_FRACTION, MAX_ROUNDS, DIR_NAMES, terrainAt,
+  dist, getUnit, canCast, spellCells, unitAt, routAt, MAX_ROUNDS, DIR_NAMES, terrainAt,
   moveRange, attackRange,
 } from './rules.js';
 import { SPIRITS } from '../data/spirits.js';
@@ -18,8 +18,8 @@ function attackScore(b, u, t, from) {
   const k = expectedKills(b, u, t, 1);
   let s = k * value(t);
   const left = t.soldiers - k;
-  if (left < t.start * ROUT_FRACTION) s += left * value(t) + 40 * value(t);   // finish it
-  if (from && dist(from, t) <= 1 && left >= t.start * ROUT_FRACTION) {
+  if (left < t.start * routAt(t)) s += left * value(t) + 40 * value(t);   // finish it
+  if (from && dist(from, t) <= 1 && left >= t.start * routAt(t)) {
     // counter-attack (melee only), computed with u's hypothetical soldiers unchanged
     const c = expectedKills(b, { ...t, soldiers: left }, { ...u, x: from.x, y: from.y }, 0.5, from);
     s -= c * value(u) * 0.8;
@@ -72,7 +72,7 @@ function planSpell(b, side) {
     if (!best) return null;
     const mx = Math.round((best.m.x + best.f.x) / 2), my = Math.round((best.m.y + best.f.y) / 2);
     const vertical = Math.abs(best.m.x - best.f.x) >= Math.abs(best.m.y - best.f.y);
-    return { type: 'spell', side, target: vertical ? { x: mx, y: Math.max(0, my - 2) } : { x: Math.max(0, mx - 2), y: my },
+    return { type: 'spell', unit: b.spiritUnit[side], side, target: vertical ? { x: mx, y: Math.max(0, my - 2) } : { x: Math.max(0, mx - 2), y: my },
       dir: vertical ? 'down' : 'right' };
   }
   // Hold area spells until the armies are close (the spirit is worth more in the melee).
@@ -83,7 +83,7 @@ function planSpell(b, side) {
   let best = null, bv = -1;
   const tryCast = (target, dir) => {
     const v = spellValue(b, side, spellCells(b, side, target, dir));
-    if (v > bv) { bv = v; best = { type: 'spell', side, target, dir }; }
+    if (v > bv) { bv = v; best = { type: 'spell', unit: b.spiritUnit[side], side, target, dir }; }
   };
   if (sp.shape === 'targets') tryCast({ x: 0, y: 0 });
   else for (const f of foes) {

@@ -1,14 +1,17 @@
 // Battle rules tests: node tests/battle-rules.mjs (exit 1 on failure).
+import { SPIRIT_UNIT } from '../js/data/spirits.js';
 import {
   createBattle, applyAction, legalMoves, legalTargets, expectedKills, result, unitAt, getUnit,
-  OBJ, W, H, ROUT_FRACTION, MAX_ROUNDS, spellCells, weatherFor, moveRange, attackRange, terrainAt,
+  OBJ, W, H, ROUT_FRACTION, ROUT_LEADERLESS, MAX_ROUNDS, spellCells, canCast, routAt, statsOf, weatherFor, moveRange, attackRange, terrainAt,
 } from '../js/battle/rules.js';
 import { generateMap } from '../js/battle/mapgen.js';
 import { runToEnd, autoResolve } from '../js/battle/auto.js';
 
 let fails = 0, passes = 0;
 const ok = (cond, msg) => { if (cond) passes++; else { fails++; console.error('FAIL:', msg); } };
-const U = (id, type, soldiers, extra = {}) => ({ id, kind: 'vassal', type, soldiers, training: 50, might: 50, wits: 50, ...extra });
+// v2 UnitIn: a led troop (leader = a vassal id) unless extra overrides it.
+const U = (id, type, soldiers, extra = {}) => ({ id, kind: 'troop', type, soldiers, training: 50, leader: 'v-' + id, might: 50, wits: 50, ...extra });
+const SP = (id, spirit, extra = {}) => ({ id, kind: 'spirit', type: spirit, ...extra });
 const input = (a, d, extra = {}) => ({ provinceId: 0, terrain: 'plains', siege: true, attacker: { house: 'aldmere', units: a, spirit: null },
   defender: { house: 'corvane', units: d, spirit: null }, ...extra });
 // Put units at chosen squares on an all-grass board.
@@ -103,28 +106,72 @@ for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for
 
 // Spells.
 {
-  const b = sandbox([U('a', 'footmen', 200)], [U('d1', 'footmen', 200), U('d2', 'footmen', 200)]);
-  b.spirit.attacker = 'ember';
-  place(b, 'a', 1, 1); place(b, 'd1', 8, 5); place(b, 'd2', 10, 5);
-  const r = applyAction(b, { type: 'spell', side: 'attacker', target: { x: 7, y: 5 }, dir: 'right' });
-  ok(r.ok && getUnit(b, 'd1').soldiers === 140 && getUnit(b, 'd2').soldiers === 140, 'ember line 30%');
-  ok(!applyAction(b, { type: 'spell', side: 'attacker', target: { x: 7, y: 5 } }).ok, 'spell once');
-  const t = sandbox([U('a', 'footmen', 200)], [U('d', 'footmen', 200)]);
-  t.spirit.attacker = 'tide'; place(t, 'a', 1, 1); place(t, 'd', 8, 5);
-  applyAction(t, { type: 'spell', side: 'attacker', target: { x: 9, y: 6 } });
+  // The spirit is a unit in the 5th slot; the spell action names it.
+  const b = sandbox([U('a', 'footmen', 200), SP('sp', 'ember')], [U('d1', 'footmen', 200), U('d2', 'footmen', 200)]);
+  place(b, 'a', 1, 1); place(b, 'sp', 1, 3); place(b, 'd1', 8, 5); place(b, 'd2', 10, 5);
+  const spU = getUnit(b, 'sp');
+  ok(spU.kind === 'spirit' && spU.soldiers === SPIRIT_UNIT.ember.soldiers && b.spirit.attacker === 'ember' && b.spiritUnit.attacker === 'sp', 'spirit unit from SPIRIT_UNIT');
+  ok(!applyAction(b, { type: 'spell', unit: 'a', target: { x: 7, y: 5 }, dir: 'right' }).ok, 'only the spirit casts');
+  const r = applyAction(b, { type: 'spell', unit: 'sp', target: { x: 7, y: 5 }, dir: 'right' });
+  ok(r.ok && r.events.some(e => e.t === 'spell' && e.caster === 'sp'), 'spell names its caster');
+  ok(getUnit(b, 'd1').soldiers === 140 && getUnit(b, 'd2').soldiers === 140, 'ember line 30%');
+  ok(!applyAction(b, { type: 'spell', unit: 'sp', target: { x: 7, y: 5 } }).ok, 'spell once');
+  ok(legalTargets(b, 'sp').length === 0 && legalMoves(b, 'sp').length > 0, 'spirit still moves and fights after casting');
+  const t = sandbox([U('a', 'footmen', 200), SP('sp', 'tide')], [U('d', 'footmen', 200)]);
+  place(t, 'a', 1, 1); place(t, 'sp', 1, 3); place(t, 'd', 8, 5);
+  applyAction(t, { type: 'spell', unit: 'sp', target: { x: 9, y: 6 } });
   ok(getUnit(t, 'd').slowed === 2, 'tide slows');
-  const s = sandbox([U('a', 'footmen', 200)], [U('d', 'footmen', 200)]);
-  s.spirit.attacker = 'stone'; place(s, 'a', 1, 1); place(s, 'd', 12, 10);
-  applyAction(s, { type: 'spell', side: 'attacker', target: { x: 4, y: 0 }, dir: 'down' });
+  const s = sandbox([U('a', 'footmen', 200), SP('sp', 'stone')], [U('d', 'footmen', 200)]);
+  place(s, 'a', 1, 1); place(s, 'sp', 0, 8); place(s, 'd', 12, 10);
+  applyAction(s, { type: 'spell', unit: 'sp', target: { x: 4, y: 0 }, dir: 'down' });
   ok(s.tempWalls.length === 5, 'stone wall placed');
   ok(!legalMoves(s, 'a').some(c => c.x === 4 && c.y <= 4), 'wall blocks');
-  const g = sandbox([U('a', 'footmen', 200)], [U('d1', 'footmen', 300), U('d2', 'footmen', 100), U('d3', 'footmen', 200), U('d4', 'footmen', 50)]);
-  g.spirit.attacker = 'gale';
+  const g = sandbox([U('a', 'footmen', 200), SP('sp', 'gale')], [U('d1', 'footmen', 300), U('d2', 'footmen', 100), U('d3', 'footmen', 200), U('d4', 'footmen', 50)]);
   ok(spellCells(g, 'attacker', { x: 0, y: 0 }).length === 3, 'gale hits 3');
-  const d = sandbox([U('a', 'footmen', 200)], [U('d', 'footmen', 200)]);
-  d.spirit.attacker = 'dusk'; place(d, 'a', 1, 1); place(d, 'd', 8, 5);
-  applyAction(d, { type: 'spell', side: 'attacker', target: { x: 8, y: 5 } });
+  ok(getUnit(g, 'sp').flying, 'gale owl flies');
+  const d = sandbox([U('a', 'footmen', 200), SP('sp', 'dusk')], [U('d', 'footmen', 200)]);
+  place(d, 'a', 1, 1); place(d, 'sp', 1, 3); place(d, 'd', 8, 5);
+  applyAction(d, { type: 'spell', unit: 'sp', target: { x: 8, y: 5 } });
   ok(getUnit(d, 'd').confused === 2, 'dusk confuses');
+  // A banished spirit cannot cast.
+  const x = sandbox([U('a', 'footmen', 200), SP('sp', 'ember')], [U('d', 'knights', 400, { might: 100, training: 100 })]);
+  place(x, 'a', 1, 1); place(x, 'sp', 6, 5); place(x, 'd', 7, 5);
+  getUnit(x, 'sp').soldiers = 30;   // below 30% of 120
+  applyAction(x, { type: 'endSide' });
+  applyAction(x, { type: 'attack', unit: 'd', target: 'sp' });
+  applyAction(x, { type: 'endSide' });
+  ok(getUnit(x, 'sp').out && !canCast(x, 'attacker'), 'banished spirit cannot cast');
+  ok(!applyAction(x, { type: 'spell', unit: 'sp', target: { x: 7, y: 5 }, dir: 'right' }).ok, 'no spell from a banished spirit');
+}
+
+// v2 army: 4 troop units + the 5th slot; leaders; leaderless units rout at 40%.
+{
+  const many = [1, 2, 3, 4, 5, 6].map(i => U('a' + i, 'footmen', 100));
+  const b = createBattle(input([...many, { id: 'c', kind: 'company', type: 'golem', soldiers: 60 }, SP('sp', 'ember')],
+    [U('d', 'footmen', 100)]), 3);
+  const att = b.units.filter(u => u.side === 'attacker');
+  ok(att.length === 5, '4 units + 5th slot (got ' + att.length + ')');
+  ok(att.filter(u => u.kind === 'troop').length === 4 && att.filter(u => u.kind === 'company' || u.kind === 'spirit').length === 1, 'one 5th-slot unit');
+  const L = createBattle(input([U('led', 'footmen', 100), U('free', 'footmen', 100, { leader: null, might: 80, wits: 80 })], [U('d', 'footmen', 100)]), 1);
+  const led = getUnit(L, 'led'), free = getUnit(L, 'free');
+  ok(led.leader === 'v-led' && led.might === 50, 'led unit takes leader stats');
+  ok(free.leader === null && free.might === 0 && free.wits === 0, 'leaderless: might/wits 0');
+  ok(routAt(led) === ROUT_FRACTION && routAt(free) === ROUT_LEADERLESS && ROUT_LEADERLESS === 0.4, 'rout thresholds 30% / 40%');
+  const k = sandbox([U('a', 'knights', 400, { might: 100, training: 100 })], [U('d', 'footmen', 100, { leader: null }), U('d2', 'footmen', 100)]);
+  place(k, 'a', 5, 5); place(k, 'd', 6, 5); place(k, 'd2', 14, 1);
+  const dd = getUnit(k, 'd');
+  // Make sure the hit leaves it between 30% and 40%: set soldiers so a small hit lands there.
+  dd.soldiers = 100; dd.start = 100;
+  const kills = Math.round(expectedKills(k, getUnit(k, 'a'), dd));
+  ok(kills > 0, 'knights hurt footmen');
+  dd.soldiers = 39 + Math.min(kills, 60);
+  applyAction(k, { type: 'attack', unit: 'a', target: 'd' });
+  ok(dd.soldiers >= 40 || dd.out, 'leaderless unit under 40% routs (soldiers ' + dd.soldiers + ', out ' + dd.out + ')');
+  const legacy = createBattle({ terrain: 'plains', siege: false, attacker: { house: 'aldmere', units: [{ id: 'v', kind: 'vassal', vassalId: 'aldmere_1', type: 'knights', soldiers: 100, might: 70 }], spirit: 'tide' },
+    defender: { house: null, units: [{ id: 'm', kind: 'militia', type: 'militia', soldiers: 80 }] } }, 1);
+  ok(getUnit(legacy, 'v').leader === 'aldmere_1' && getUnit(legacy, 'attacker-spirit')?.kind === 'spirit', 'legacy input: vassal leader and side spirit become v2 units');
+  ok(getUnit(legacy, 'm').leader === null && routAt(getUnit(legacy, 'm')) === 0.4, 'militia is leaderless');
+  ok(statsOf('stone').def === 24 && statsOf('stone').name === 'Stone Warden', 'spirit stats');
 }
 
 // Weather.
@@ -148,16 +195,15 @@ for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for
 
 // Determinism, JSON round-trip, result shape.
 {
-  const inp = input([U('a1', 'knights', 200), U('a2', 'archers', 150), U('a3', 'siege', 80)],
-    [U('d1', 'pikes', 200), U('d2', 'archers', 150)], { season: 0 });
-  inp.attacker.spirit = 'gale'; inp.defender.spirit = 'stone';
+  const inp = input([U('a1', 'knights', 200), U('a2', 'archers', 150), U('a3', 'siege', 80), SP('as', 'gale')],
+    [U('d1', 'pikes', 200), U('d2', 'archers', 150, { leader: null }), SP('ds', 'stone')], { season: 0 });
   const r1 = autoResolve(inp, 42), r2 = autoResolve(inp, 42);
   ok(JSON.stringify(r1) === JSON.stringify(r2), 'deterministic by seed');
   const b = createBattle(inp, 42);
   const copy = JSON.parse(JSON.stringify(b));
   runToEnd(b); runToEnd(copy);
   ok(JSON.stringify(result(b)) === JSON.stringify(result(copy)), 'state survives JSON round-trip');
-  ok(['attacker', 'defender'].includes(r1.winner) && r1.attacker.units.length === 3 && r1.defender.units.length === 2, 'result shape');
+  ok(['attacker', 'defender'].includes(r1.winner) && r1.attacker.units.length === 4 && r1.defender.units.length === 3, 'result shape (every unit, spirits included)');
   ok(r1.attacker.units.every(u => ['ok', 'routed', 'dead'].includes(u.fate)), 'fates');
   const empty = createBattle(input([U('a', 'footmen', 200)], []), 1);
   ok(empty.winner === 'attacker', 'empty defender loses');

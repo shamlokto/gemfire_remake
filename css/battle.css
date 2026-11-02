@@ -212,3 +212,14 @@
   .bt-result { padding: 14px; }
   .bt-result h2 { font-size: 26px; }
 }
+
+/* v2: 4 + 5th slot roster, leaderless units, the summoned spirit */
+.bt-slot-label { font-family: Cinzel, Georgia, serif; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent, #d8b05a); margin: 6px 2px 0; opacity: .85; }
+.bt-card-empty { display: flex; align-items: center; justify-content: center; min-height: 34px; font-size: 11px;
+  color: var(--muted, #a99a7c); border-style: dashed !important; opacity: .55; cursor: default; font-style: italic; }
+.bt-card-noleader .bt-card-type { font-style: italic; }
+.bt-card-spirit { border-left-color: var(--spirit-col) !important; box-shadow: inset 0 0 14px -4px var(--spirit-col); }
+.bt-card-spirit .bt-card-name { color: var(--spirit-col); }
+.bt-spirit.bt-linked { box-shadow: 0 0 0 2px var(--accent, #d8b05a), 0 0 14px rgba(255, 215, 120, .5); }
+@media (max-width: 760px) { .bt-slot-label { flex: 1 1 100%; margin: 2px 2px 0; } .bt-card-empty { display: none; } }

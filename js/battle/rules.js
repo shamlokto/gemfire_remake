@@ -4,17 +4,27 @@
 // { ok, msg?, events[] } where events describe what happened for the view to animate:
 //   { t:'move', unit, from:{x,y}, to:{x,y} }
 //   { t:'hit', unit (attacker), target, killed, counter?:bool, ranged:bool, rout?:bool }
-//   { t:'rout', unit } { t:'spell', side, spirit, cells:[{x,y}], hits:[{unit,killed}] }
+//   { t:'rout', unit } { t:'spell', side, spirit, caster, cells:[{x,y}], hits:[{unit,killed}] }
+//
+// v2 army model (docs/DESIGN.md "v2"): each side fields up to 4 troop/militia units plus a 5th
+// slot (a company or a summoned spirit unit). Units carry `leader` (vassal id or null); might/wits
+// come from the leader (0 when leaderless). Led units rout below ROUT_LED, leaderless below
+// ROUT_LEADERLESS. The spirit unit fights like any unit and casts its spell once (the spell action
+// names the spirit unit); once it is banished it cannot cast.
 //   { t:'heal', unit, amount } { t:'side', side, round } { t:'over', winner, reason }
 
-import { TROOPS, COMPANIES, MILITIA } from '../data/units.js';
-import { SPIRITS } from '../data/spirits.js';
+import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from '../data/units.js';
+import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { makeRng } from '../rng.js';
 import { W, H, OBJ, TERRAIN, generateMap, idx } from './mapgen.js';
 
 export { W, H, OBJ, TERRAIN };
 export const MAX_ROUNDS = 15;
-export const ROUT_FRACTION = 0.3;      // units below 30% of their starting soldiers rout
+export const ROUT_FRACTION = ROUT_LED; // led units rout below 30% of their starting soldiers
+export { ROUT_LED, ROUT_LEADERLESS };
+// Rout threshold of one unit (fraction of its starting soldiers).
+export function routAt(u) { return u.rout ?? (u.leader || u.kind === 'spirit' ? ROUT_LED : ROUT_LEADERLESS); }
+const FIFTH = new Set(['company', 'spirit']);
 export const DAMAGE_DIV = 6;           // DESIGN.md had 10; tuned so battles finish in 15 rounds
 const CAVALRY = new Set(['horse', 'knights', 'wolfriders']);
 // Weather from season (0 spring .. 3 winter) and terrain. Rules effects (kept small):
@@ -29,8 +39,20 @@ export function weatherFor(season, terrain) {
 const DIRS = { right: [1, 0], left: [-1, 0], down: [0, 1], up: [0, -1] };
 export const DIR_NAMES = Object.keys(DIRS);
 
+const SPIRIT_STATS = Object.fromEntries(Object.entries(SPIRIT_UNIT).map(([k, v]) =>
+  [k, { ...v, name: SPIRITS[k].name, spirit: true }]));
 export function statsOf(type) {
-  return TROOPS[type] || COMPANIES[type] || MILITIA;
+  return TROOPS[type] || COMPANIES[type] || SPIRIT_STATS[type] || MILITIA;
+}
+
+// Normalise one side's units to the v2 army: at most 4 troop/militia units plus one 5th-slot unit
+// (company or spirit). A legacy side-level `spirit` becomes a spirit unit when the 5th is free.
+export function armyOf(side, tag) {
+  const list = (side.units || []).filter(u => (u.soldiers || 0) > 0 || u.kind === 'spirit');
+  const main = list.filter(u => !FIFTH.has(u.kind)).slice(0, MAX_UNITS_PER_ARMY);
+  let fifth = list.find(u => FIFTH.has(u.kind)) || null;
+  if (!fifth && side.spirit && SPIRIT_UNIT[side.spirit]) fifth = { id: `${tag}-spirit`, kind: 'spirit', type: side.spirit };
+  return fifth ? [...main, fifth] : main;
 }
 export function enemyOf(side) { return side === 'attacker' ? 'defender' : 'attacker'; }
 
@@ -40,32 +62,43 @@ export function createBattle(input, seed = 1) {
   const siege = !!input.siege;
   const grid = generateMap(input.terrain || 'plains', seed, siege);
   const b = {
-    v: 1, seed, rng: (seed * 2654435761) >>> 0,
+    v: 2, seed, rng: (seed * 2654435761) >>> 0,
     provinceId: input.provinceId ?? null, terrain: input.terrain || 'plains', siege,
     grid, round: 1, side: 'attacker', winner: null, reason: null,
     season: input.season ?? null,
     weather: input.weather !== undefined ? input.weather : weatherFor(input.season, input.terrain || 'plains'),
     gateBreached: false,
     houses: { attacker: input.attacker.house ?? null, defender: input.defender.house ?? null },
-    spirit: { attacker: input.attacker.spirit || null, defender: input.defender.spirit || null },
+    spirit: { attacker: null, defender: null },        // spirit id per side (from its spirit unit)
+    spiritUnit: { attacker: null, defender: null },    // that unit's id
     spiritUsed: { attacker: false, defender: false },
     tempWalls: [],          // { x, y, side, until }
     units: [], log: [],
   };
   const mk = (u, side) => {
     const st = statsOf(u.type);
-    const soldiers = Math.max(1, Math.round(u.soldiers || 0));
+    const spirit = u.kind === 'spirit';
+    const soldiers = Math.max(1, Math.round(u.soldiers || (spirit ? SPIRIT_UNIT[u.type]?.soldiers : 0) || 0));
+    // Leader: v2 `leader`, or a legacy vassal-kind unit's vassalId.
+    const leader = u.leader !== undefined ? (u.leader ?? null) : (u.kind === 'vassal' ? u.vassalId ?? null : null);
+    const kind = u.kind === 'vassal' || !u.kind ? 'troop' : u.kind;
     return {
-      id: String(u.id), side, kind: u.kind || 'vassal', vassalId: u.vassalId ?? null, type: u.type, ruler: !!u.ruler,
+      id: String(u.id), side, kind, leader, vassalId: leader, type: u.type, ruler: !!u.ruler,
       soldiers, start: soldiers,
-      training: u.training ?? 50, might: u.might ?? (u.kind === 'militia' ? 30 : 50), wits: u.wits ?? 50,
+      training: u.training ?? (spirit ? 60 : 50),
+      might: leader ? (u.might ?? 50) : (spirit ? (u.might ?? 40) : 0),
+      wits: leader ? (u.wits ?? 50) : (spirit ? (u.wits ?? 60) : 0),
       x: 0, y: 0, moved: false, acted: false, out: null,   // out: null | 'routed' | 'dead' | 'fled'
       slowed: 0, confused: 0,
       flying: !!st.flying, ghost: !!st.ignoresTerrain,
     };
   };
-  const att = input.attacker.units.filter(u => (u.soldiers || 0) > 0).map(u => mk(u, 'attacker'));
-  const def = input.defender.units.filter(u => (u.soldiers || 0) > 0).map(u => mk(u, 'defender'));
+  const att = armyOf(input.attacker, 'attacker').map(u => mk(u, 'attacker'));
+  const def = armyOf(input.defender, 'defender').map(u => mk(u, 'defender'));
+  for (const u of [...att, ...def]) {
+    u.rout = routAt(u);
+    if (u.kind === 'spirit') { b.spirit[u.side] = u.type; b.spiritUnit[u.side] = u.id; }
+  }
   deploy(b, att, def);
   b.units = [...att, ...def];
   addLog(b, `Battle begins: ${att.length} units attack, ${def.length} defend.`);
@@ -251,11 +284,17 @@ function rollKills(b, rng, att, tgt, mult) {
 function applyLoss(b, u, killed, events) {
   u.soldiers = Math.max(0, u.soldiers - killed);
   if (u.soldiers === 0) { u.out = 'dead'; events.push({ t: 'rout', unit: u.id, dead: true }); addLog(b, `${label(u)} is destroyed.`); return true; }
-  if (u.soldiers < u.start * ROUT_FRACTION) { u.out = 'routed'; events.push({ t: 'rout', unit: u.id }); addLog(b, `${label(u)} routs!`); return true; }
+  if (u.soldiers < u.start * routAt(u)) {
+    u.out = 'routed'; events.push({ t: 'rout', unit: u.id, banished: u.kind === 'spirit' });
+    addLog(b, u.kind === 'spirit' ? `${label(u)} is banished!` : `${label(u)} routs!`); return true;
+  }
   return false;
 }
 
-export function label(u) { return `${u.side === 'attacker' ? 'Attacker' : 'Defender'} ${statsOf(u.type).name}`; }
+export function label(u) {
+  if (u.kind === 'spirit') return `The ${statsOf(u.type).name}`;
+  return `${u.side === 'attacker' ? 'Attacker' : 'Defender'} ${statsOf(u.type).name}`;
+}
 
 // ---------------------------------------------------------------- turn flow
 
@@ -355,8 +394,13 @@ export function spellCells(b, side, target, dir) {
   return cells;
 }
 
+export function spiritOf(b, side) {
+  const id = b.spiritUnit && b.spiritUnit[side];
+  return id ? getUnit(b, id) : null;
+}
 export function canCast(b, side) {
-  return !b.winner && b.side === side && !!b.spirit[side] && !b.spiritUsed[side];
+  const u = spiritOf(b, side);
+  return !b.winner && b.side === side && !!u && !u.out && !b.spiritUsed[side];
 }
 
 function castSpell(b, side, target, dir, events) {
@@ -371,7 +415,7 @@ function castSpell(b, side, target, dir, events) {
     for (const c of cells) { const u = unitAt(b, c.x, c.y); if (u && u.side !== side) out.push(u); }
     return out;
   };
-  const evt = { t: 'spell', side, spirit: spiritId, cells, hits };
+  const evt = { t: 'spell', side, spirit: spiritId, caster: b.spiritUnit[side], cells, hits };
   events.push(evt);
   if (sp.shape === 'wall') {
     for (const c of cells) {
@@ -446,8 +490,12 @@ export function applyAction(b, a) {
       return { ok: true, events };
     }
     case 'spell': {
-      if (!canCast(b, a.side)) return fail('spirit unavailable');
-      castSpell(b, a.side, a.target, a.dir, events);
+      // { type:'spell', unit: spiritUnitId, target, dir } (legacy: { side } instead of unit).
+      const caster = a.unit ? getUnit(b, a.unit) : null;
+      const side = caster ? caster.side : a.side;
+      if (a.unit && (!caster || caster.kind !== 'spirit')) return fail('not a spirit');
+      if (!canCast(b, side)) return fail('spirit unavailable');
+      castSpell(b, side, a.target, a.dir, events);
       return { ok: true, events };
     }
     case 'endSide': {

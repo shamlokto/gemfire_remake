@@ -12,7 +12,7 @@
 
 import {
   createBattle, applyAction, legalMoves, legalTargets, result, getUnit, unitAt, liveUnits,
-  spellCells, canCast, sideDone, statsOf, terrainAt, enemyOf, W, H, OBJ, TERRAIN, MAX_ROUNDS,
+  spellCells, canCast, spiritOf, routAt, sideDone, statsOf, terrainAt, enemyOf, W, H, OBJ, TERRAIN, MAX_ROUNDS,
   moveRange, attackRange, expectedKills, DIR_NAMES,
 } from '../battle/rules.js';
 import { chooseAction } from '../battle/ai.js';
@@ -414,9 +414,13 @@ export async function runBattle(container, input, opts = {}) {
   const figCol = side => { const [r, g, bb] = hexToRgb(S[side].color); return (r + g + bb) / 3 < 70 ? shade(S[side].color, 0.35) : S[side].color; };
   const province = PROVINCES[b.provinceId] || null;
   const vassalOf = u => (u.vassalId && VASSAL_BY_ID[u.vassalId]) || null;
-  const unitName = u => vassalOf(u)?.name || (u.kind === 'company' ? statsOf(u.type).name : u.kind === 'militia' ? 'Militia' : statsOf(u.type).name);
+  const isSpirit = u => u.kind === 'spirit';
+  const unitName = u => vassalOf(u)?.name || (isSpirit(u) ? SPIRITS[u.type].name : u.kind === 'militia' ? 'Militia' : statsOf(u.type).name);
+  // Short role line: leader title, "Leaderless", "Hired company", "Summoned spirit".
+  const roleOf = u => isSpirit(u) ? 'Summoned spirit' : u.kind === 'company' ? 'Hired company' :
+    u.kind === 'militia' ? 'Local militia' : vassalOf(u) ? vassalOf(u).title : 'Leaderless';
   const isRuler = u => u.ruler || (u.vassalId && b.houses[u.side] && HOUSE_BY_ID[b.houses[u.side]]?.ruler === u.vassalId);
-  const portraitSlot = u => vassalOf(u)?.portrait ?? null;
+  const portraitSlot = u => isSpirit(u) ? SPIRITS[u.type].art : (vassalOf(u)?.portrait ?? null);
   const spriteSlot = u => {
     const hs = houseTroopSprite(b.houses[u.side], u.type);
     if (hs && hasArt(hs)) return { slot: hs, tint: false };
@@ -429,7 +433,7 @@ export async function runBattle(container, input, opts = {}) {
   const want = new Set([BATTLE_FRAME, BATTLE_BACKDROP[b.terrain], ...Object.values(BATTLE_MOMENT), CREST[b.houses.attacker], CREST[b.houses.defender]]);
   if (b.weather) want.add(WEATHER_FX[b.weather]);
   for (const k of new Set(b.grid)) want.add(TERRAIN_TILE[k]);
-  for (const u of b.units) { want.add(CLASH_CUTIN[u.type]); want.add(portraitSlot(u)); const s = spriteSlot(u); if (s) want.add(s.slot); }
+  for (const u of b.units) { want.add(isSpirit(u) ? SPIRIT_CUTIN[u.type] : CLASH_CUTIN[u.type]); want.add(portraitSlot(u)); const s = spriteSlot(u); if (s) want.add(s.slot); }
   for (const side of ['attacker', 'defender']) if (b.spirit[side]) { want.add(SPIRIT_CUTIN[b.spirit[side]]); want.add(SPIRITS[b.spirit[side]].fx); want.add(SPIRITS[b.spirit[side]].art); }
   await Promise.all([...want].filter(s => s != null && hasArt(s)).map(s => loadImg(art(s))));
 
@@ -657,10 +661,11 @@ export async function runBattle(container, input, opts = {}) {
     }
     g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.4, cs * 0.13, 0, 0, 7); g.fill();
     g.fillStyle = rgba(S[u.side].color, 0.55); g.beginPath(); g.ellipse(cx, cy + cs * 0.32, cs * 0.36, cs * 0.1, 0, 0, 7); g.fill();
-    const sprite = spriteSlot(u);
-    const im = sprite && artImg(sprite.slot);
-    const figs = figureLayout(u).slice().sort((a, b2) => a[1] - b2[1]);
     const t = view.now / 1000;
+    if (isSpirit(u)) drawSpiritUnit(u, cx, cy, d, t);
+    const sprite = !isSpirit(u) && spriteSlot(u);
+    const im = sprite && artImg(sprite.slot);
+    const figs = isSpirit(u) ? [] : figureLayout(u).slice().sort((a, b2) => a[1] - b2[1]);
     figs.forEach(([fx, fy], i) => {
       const bob = Math.sin(t * 2.2 + d.phase + i * 1.3) * cs * 0.025;
       const x = cx + fx * cs * facing, y = cy + fy * cs + cs * 0.22 + bob;
@@ -673,14 +678,17 @@ export async function runBattle(container, input, opts = {}) {
         drawFigure(g, u.type, x, y, s, col, acc, facing, t + d.phase + i * 0.4);
       }
     });
-    // banner on the lead
+    // banner on the lead (leaderless units carry a plain pennant: no house colours, grey cloth)
     const bx = cx - cs * 0.32 * facing, by = cy - cs * 0.42;
+    if (!isSpirit(u)) {
     g.strokeStyle = '#2a1d10'; g.lineWidth = Math.max(1.2, cs / 28);
     g.beginPath(); g.moveTo(bx, by + cs * 0.55); g.lineTo(bx, by); g.stroke();
     const wave = Math.sin(t * 4 + d.phase) * cs * 0.03;
     g.fillStyle = S[u.side].color; g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(bx + cs * 0.12 * facing, by - wave, bx + cs * 0.24 * facing, by + cs * 0.04);
     g.lineTo(bx + cs * 0.2 * facing, by + cs * 0.12); g.quadraticCurveTo(bx + cs * 0.1 * facing, by + cs * 0.14 + wave, bx, by + cs * 0.16); g.fill();
+    if (!u.leader && u.kind !== 'company') { g.fillStyle = 'rgba(20,16,24,0.55)'; g.fill(); }
     g.strokeStyle = acc; g.lineWidth = 1; g.stroke();
+    }
     if (isRuler(u)) { g.fillStyle = '#ffd66e'; g.font = `${Math.max(8, cs * 0.22)}px serif`; g.textAlign = 'center'; g.fillText('♛', bx + cs * 0.1 * facing, by - cs * 0.04); }
     // hit flash
     if (d.flash > 0) {
@@ -692,7 +700,7 @@ export async function runBattle(container, input, opts = {}) {
     const bw = cs * 0.78, bh = Math.max(3, cs * 0.08), bxx = cx - bw / 2, byy = cy + cs * 0.42;
     g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(bxx - 1, byy - 1, bw + 2, bh + 2);
     g.fillStyle = frac > 0.6 ? '#7fcf6a' : frac > 0.35 ? '#e6c04a' : '#e0564a'; g.fillRect(bxx, byy, bw * clamp(frac, 0, 1), bh);
-    g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(bxx + bw * 0.3, byy, 1, bh);   // rout line
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(bxx + bw * routAt(u), byy, 1, bh);   // rout line (30% led, 40% leaderless)
     const fs = Math.max(9, Math.round(cs * 0.24));
     g.font = `700 ${fs}px Cinzel, Georgia, serif`; g.textAlign = 'center';
     const label = String(u.soldiers), tw = g.measureText(label).width + 6;
@@ -705,6 +713,36 @@ export async function runBattle(container, input, opts = {}) {
     if (u.slowed) { g.fillStyle = '#5ab4ff'; g.beginPath(); g.arc(sx, cy - cs * 0.38, cs * 0.07, 0, 7); g.fill(); sx += cs * 0.17; }
     if (u.confused) { g.strokeStyle = '#b48aff'; g.lineWidth = 1.5; g.beginPath(); g.arc(sx, cy - cs * 0.38, cs * 0.07, 0, 5); g.stroke(); }
     g.restore();
+  }
+
+  // A summoned spirit: a big glowing form in its colour, larger than its square, floating.
+  function drawSpiritUnit(u, cx, cy, d, t) {
+    const { cs } = view, sp = SPIRITS[u.type];
+    const fy = cy - cs * 0.1 + Math.sin(t * 1.8 + d.phase) * cs * 0.06;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    const gr = g.createRadialGradient(cx, fy, 0, cx, fy, cs * 1.1);
+    gr.addColorStop(0, rgba(sp.color, 0.75 + 0.2 * Math.sin(t * 3))); gr.addColorStop(0.55, rgba(sp.color, 0.25)); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.beginPath(); g.arc(cx, fy, cs * 1.1, 0, 7); g.fill();
+    g.restore();
+    // a dark core so the glyph reads against the glow, and rising motes
+    g.fillStyle = 'rgba(8,6,14,0.55)'; g.beginPath(); g.arc(cx, fy, cs * 0.5, 0, 7); g.fill();
+    for (let i = 0; i < 5; i++) {
+      const k = (t * 0.6 + i / 5 + d.phase) % 1;
+      g.fillStyle = rgba(sp.color, 0.8 * (1 - k));
+      g.beginPath(); g.arc(cx + Math.sin(i * 2.3 + t) * cs * 0.4, fy + cs * 0.4 - k * cs * 1.1, cs * 0.04, 0, 7); g.fill();
+    }
+    const im = artImg(sp.art);
+    if (im) {
+      g.save(); g.beginPath(); g.arc(cx, fy, cs * 0.52, 0, 7); g.clip();
+      drawCover(g, im, cx - cs * 0.52, fy - cs * 0.52, cs * 1.04, cs * 1.04); g.restore();
+      g.strokeStyle = sp.color; g.lineWidth = 2; g.beginPath(); g.arc(cx, fy, cs * 0.53, 0, 7); g.stroke();
+    } else {
+      g.save(); g.shadowColor = sp.color; g.shadowBlur = cs * 0.5;
+      drawSpiritGlyph(g, u.type, cx, fy, cs * 1.5, t); g.restore();
+    }
+    // spent marker: a dim ring once its spell is used
+    if (b.spiritUsed[u.side]) { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.setLineDash([3, 3]); g.beginPath(); g.arc(cx, fy, cs * 0.62, 0, 7); g.stroke(); g.setLineDash([]); }
   }
 
   function drawProjectiles() {
@@ -904,10 +942,22 @@ export async function runBattle(container, input, opts = {}) {
     cg.shadowBlur = 0;
     if (im) { cg.save(); cg.beginPath(); cg.rect(x, y, w, h); cg.clip(); if (flip) { cg.translate(x * 2 + w, 0); cg.scale(-1, 1); } drawCover(cg, im, x, y, w, h); cg.restore(); }
     else if (u.vassalId) drawBust(cg, x, y, w, h, S[side].color, S[side].accent, unitName(u), flip);
-    else {   // company / militia: draw the troop as the card
+    else if (isSpirit(u)) {
+      const sp = SPIRITS[u.type];
+      const grd = cg.createRadialGradient(x + w / 2, y + h * 0.45, 0, x + w / 2, y + h * 0.45, h * 0.7);
+      grd.addColorStop(0, rgba(sp.color, 0.6)); grd.addColorStop(1, '#0c0912');
+      cg.fillStyle = grd; cg.fillRect(x, y, w, h);
+      cg.save(); cg.shadowColor = sp.color; cg.shadowBlur = h * 0.15; drawSpiritGlyph(cg, u.type, x + w / 2, y + h * 0.48, Math.min(w, h) * 0.85, view.now / 1000); cg.restore();
+    } else {   // leaderless troop / company / militia: draw the troop and its banner as the card
       const grd = cg.createLinearGradient(x, y, x, y + h); grd.addColorStop(0, shade(S[side].color, -0.3)); grd.addColorStop(1, '#120e16');
       cg.fillStyle = grd; cg.fillRect(x, y, w, h);
       drawFigure(cg, u.type, x + w / 2, y + h * 0.88, h * 0.55, figCol(side), S[side].accent, flip ? -1 : 1, view.now / 1000);
+      if (u.kind === 'troop' || u.kind === 'militia') {   // "no leader" ribbon
+        const rh = Math.max(10, h * 0.11);
+        cg.fillStyle = 'rgba(12,9,16,0.8)'; cg.fillRect(x, y + h * 0.04, w, rh);
+        cg.font = `700 ${Math.round(rh * 0.62)}px Cinzel, Georgia, serif`; cg.textAlign = 'center'; cg.textBaseline = 'middle';
+        cg.fillStyle = '#cbb98e'; cg.fillText('NO LEADER', x + w / 2, y + h * 0.04 + rh / 2); cg.textBaseline = 'alphabetic';
+      }
     }
     cg.strokeStyle = '#d8b05a'; cg.lineWidth = 2; cg.strokeRect(x - 2, y - 2, w + 4, h + 4);
     cg.strokeStyle = rgba(S[side].color, 0.9); cg.lineWidth = 1; cg.strokeRect(x - 5, y - 5, w + 10, h + 10);
@@ -956,7 +1006,7 @@ export async function runBattle(container, input, opts = {}) {
       cg.save(); cg.translate(sx, sy);
       // dim the board
       cg.fillStyle = `rgba(5,4,8,${0.55 * bd.open})`; cg.fillRect(-20, -20, W2 + 40, H2 + 40);
-      cutinBackground(cg, CLASH_CUTIN[att.type] ?? CLASH_CUTIN.footmen, 0, bd.y, W2, bd.h, k, S[att.side].color, S[def.side].color, att.type);
+      cutinBackground(cg, isSpirit(att) ? SPIRIT_CUTIN[att.type] : (CLASH_CUTIN[att.type] ?? CLASH_CUTIN.footmen), 0, bd.y, W2, bd.h, k, S[att.side].color, S[def.side].color, isSpirit(att) ? 'footmen' : att.type);
       // gold rules
       cg.fillStyle = '#d8b05a'; cg.fillRect(0, bd.y - 2, W2, 2); cg.fillRect(0, bd.y + bd.h, W2, 2);
       if (bd.open > 0.6) {
@@ -973,9 +1023,9 @@ export async function runBattle(container, input, opts = {}) {
         crestAt(cg, def.side, dx + pw + dLunge - cs2 * 0.1, py + cs2 * 0.05, cs2 * 0.8);
         const fs = Math.max(12, bd.full * 0.07);
         text(cg, unitName(att), ax, py + ph + fs * 1.3, fs, '#f5ead0');
-        text(cg, statsOf(att.type).name, ax, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'left', 500);
+        text(cg, (isSpirit(att) || !vassalOf(att)) ? roleOf(att) : `${statsOf(att.type).name} · ${roleOf(att)}`, ax, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'left', 500);
         text(cg, unitName(def), dx + pw, py + ph + fs * 1.3, fs, '#f5ead0', 'right');
-        text(cg, statsOf(def.type).name, dx + pw, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'right', 500);
+        text(cg, (isSpirit(def) || !vassalOf(def)) ? roleOf(def) : `${statsOf(def.type).name} · ${roleOf(def)}`, dx + pw, py + ph + fs * 2.35, fs * 0.7, '#cbb98e', 'right', 500);
         // ticking counts
         const tickD = clamp((k - strikeAt) / 0.18, 0, 1), tickA = counter ? clamp((k - counterAt) / 0.18, 0, 1) : 0;
         const dNow = Math.round(lerp(dStart, def.soldiers, easeOut(tickD)));
@@ -990,7 +1040,7 @@ export async function runBattle(container, input, opts = {}) {
         if (k >= strikeAt) {
           const kk = clamp((k - strikeAt) / 0.5, 0, 1);
           text(cg, '-' + hit.killed, midX + W2 * 0.13, midY - easeOut(kk) * bd.full * 0.12, big * (1.25 - 0.25 * kk), '#ff6a50', 'center', 900);
-          if (hit.rout) text(cg, def.out === 'dead' ? 'DESTROYED' : 'ROUTED', midX + W2 * 0.13, midY + big * 0.9, big * 0.55, '#ffd27a', 'center', 900);
+          if (hit.rout) text(cg, def.out === 'dead' ? 'DESTROYED' : isSpirit(def) ? 'BANISHED' : 'ROUTED', midX + W2 * 0.13, midY + big * 0.9, big * 0.55, '#ffd27a', 'center', 900);
         }
         if (counter && k >= counterAt) {
           const kk = clamp((k - counterAt) / 0.4, 0, 1);
@@ -1015,7 +1065,7 @@ export async function runBattle(container, input, opts = {}) {
     });
   }
 
-  function spiritCutin(side, spiritId) {
+  function spiritCutin(side, spiritId, summon = false) {
     const sp = SPIRITS[spiritId];
     sfx.play('spell'); sfx.play('wind');
     try { playSting('summon'); } catch { /* audio unavailable */ }
@@ -1052,8 +1102,8 @@ export async function runBattle(container, input, opts = {}) {
       cg.globalAlpha = ta;
       const fs = Math.max(20, Math.min(W2, H2) * 0.075);
       text(cg, sp.name.toUpperCase(), W2 / 2, H2 * 0.82, fs, '#ffffff', 'center', 900);
-      text(cg, sp.spell, W2 / 2, H2 * 0.82 + fs * 1.0, fs * 0.6, sp.color, 'center', 700);
-      text(cg, `called by ${S[side].full}`, W2 / 2, H2 * 0.82 + fs * 1.7, fs * 0.38, '#d9ccb0', 'center', 500, 'EB Garamond');
+      text(cg, summon ? 'answers the call' : sp.spell, W2 / 2, H2 * 0.82 + fs * 1.0, fs * 0.6, sp.color, 'center', 700);
+      text(cg, summon ? `summoned to the field by ${S[side].full}` : `called by ${S[side].full}`, W2 / 2, H2 * 0.82 + fs * 1.7, fs * 0.38, '#d9ccb0', 'center', 500, 'EB Garamond');
       cg.globalAlpha = 1;
     });
   }
@@ -1131,6 +1181,7 @@ export async function runBattle(container, input, opts = {}) {
     const im = artImg(portraitSlot(u));
     if (im) drawCover(cg, im, 0, 0, 72, 90);
     else if (u.vassalId) drawBust(cg, 0, 0, 72, 90, S[u.side].color, S[u.side].accent, unitName(u));
+    else if (isSpirit(u)) { const sp = SPIRITS[u.type]; cg.fillStyle = shade(sp.color, -0.7); cg.fillRect(0, 0, 72, 90); drawSpiritGlyph(cg, u.type, 36, 45, 64, 0); }
     else { cg.fillStyle = shade(S[u.side].color, -0.5); cg.fillRect(0, 0, 72, 90); drawFigure(cg, u.type, 36, 80, 50, figCol(u.side), S[u.side].accent, 1, 0); }
     return c;
   }
@@ -1139,19 +1190,30 @@ export async function runBattle(container, input, opts = {}) {
     for (const side of ['attacker', 'defender']) {
       const box = root.querySelector(side === 'attacker' ? '.bt-roster-a' : '.bt-roster-d');
       box.innerHTML = '';
-      for (const u of b.units.filter(x => x.side === side)) {
-        const card = el('button', 'bt-card');
+      const mine = b.units.filter(x => x.side === side);
+      const main = mine.filter(x => x.kind !== 'company' && x.kind !== 'spirit');
+      const fifth = mine.find(x => x.kind === 'company' || x.kind === 'spirit') || null;
+      // 4 main slots + the 5th (company or spirit); empty slots shown dim.
+      const slots = [...main.slice(0, 4)];
+      while (slots.length < 4) slots.push(null);
+      slots.push(fifth || 'fifth-empty');
+      slots.forEach((u, i) => {
+        if (i === 4) { const h = el('div', 'bt-slot-label'); h.textContent = fifth ? `5th: ${fifth.kind === 'spirit' ? 'spirit' : 'company'}` : '5th: company / spirit'; box.appendChild(h); }
+        if (!u || u === 'fifth-empty') { const e = el('div', 'bt-card bt-card-empty'); e.textContent = i === 4 ? 'none' : 'empty slot'; box.appendChild(e); return; }
+        const card = el('button', 'bt-card' + (isSpirit(u) ? ' bt-card-spirit' : '') + (!u.leader && u.kind === 'troop' ? ' bt-card-noleader' : ''));
+        if (isSpirit(u)) card.style.setProperty('--spirit-col', SPIRITS[u.type].color);
         card.appendChild(portraitThumb(u));
         const info = el('div', 'bt-card-info');
         info.innerHTML = `<div class="bt-card-name"></div><div class="bt-card-type"></div><div class="bt-card-bar"><i></i></div><div class="bt-card-status"></div>`;
         info.querySelector('.bt-card-name').textContent = (isRuler(u) ? '♛ ' : '') + unitName(u);
-        info.querySelector('.bt-card-type').textContent = statsOf(u.type).name + (u.kind === 'company' ? ' (company)' : '');
+        info.querySelector('.bt-card-type').textContent = isSpirit(u) ? `${roleOf(u)} · ${SPIRITS[u.type].spell}` :
+          (vassalOf(u) ? statsOf(u.type).name : roleOf(u));
         card.appendChild(info);
         card.addEventListener('click', () => { if (!u.out) { view.sel = u.id; view.mode = 'idle'; showTip(u); } });
         card.addEventListener('pointerenter', () => { if (!u.out) view.hover = { x: u.x, y: u.y }; });
         box.appendChild(card);
         rosterEls.set(u.id, card);
-      }
+      });
     }
   }
   function updateHud() {
@@ -1159,7 +1221,7 @@ export async function runBattle(container, input, opts = {}) {
       const c = rosterEls.get(u.id);
       if (!c) continue;
       c.querySelector('.bt-card-bar i').style.width = (100 * u.soldiers / u.start) + '%';
-      const st = u.out === 'dead' ? 'Destroyed' : u.out === 'routed' ? 'Routed' : u.out === 'fled' ? 'Withdrew' :
+      const st = u.out === 'dead' ? 'Destroyed' : u.out === 'routed' ? (isSpirit(u) ? 'Banished' : 'Routed') : u.out === 'fled' ? 'Withdrew' :
         `${u.soldiers} / ${u.start}` + (u.slowed ? ' · slowed' : '') + (u.confused ? ' · confused' : '') + (!isAI(u.side) && u.side === b.side && u.acted ? ' · done' : '');
       c.querySelector('.bt-card-status').textContent = st;
       c.classList.toggle('bt-out', !!u.out);
@@ -1184,9 +1246,12 @@ export async function runBattle(container, input, opts = {}) {
     $('.bt-sound').classList.toggle('bt-on', prefs.sound);
     const spBtn = $('.bt-spirit');
     const mySp = playerSide && b.spirit[playerSide];
+    const spU = playerSide && spiritOf(b, playerSide);
     spBtn.hidden = !mySp;
     if (mySp) {
-      spBtn.querySelector('span').textContent = b.spiritUsed[playerSide] ? `${SPIRITS[mySp].name} (spent)` : `${SPIRITS[mySp].spell}`;
+      spBtn.querySelector('span').textContent = spU && spU.out ? `${SPIRITS[mySp].name} (banished)` :
+        b.spiritUsed[playerSide] ? `${SPIRITS[mySp].name} (spent)` : `${SPIRITS[mySp].spell}`;
+      spBtn.classList.toggle('bt-linked', !!spU && view.sel === spU.id);
       spBtn.disabled = !myTurn || !canCast(b, playerSide);
       spBtn.classList.toggle('bt-on', view.mode === 'spell');
       spBtn.title = SPIRITS[mySp].text;
@@ -1221,7 +1286,9 @@ export async function runBattle(container, input, opts = {}) {
     hd.innerHTML = `<b></b><div class="bt-tip-sub"></div><div class="bt-tip-sub2"></div>`;
     hd.querySelector('b').textContent = unitName(u);
     hd.querySelector('.bt-tip-sub').textContent = `${S[u.side].name} · ${st.name}${isRuler(u) ? ' · Ruler' : ''}`;
-    hd.querySelector('.bt-tip-sub2').textContent = v ? `${v.title} · Might ${u.might} · Wits ${u.wits}` : (u.kind === 'company' ? 'Hired company' : 'Local militia');
+    hd.querySelector('.bt-tip-sub2').textContent = v ? `Led by ${v.name} · Might ${u.might} · Wits ${u.wits}` :
+      isSpirit(u) ? `${roleOf(u)} · ${SPIRITS[u.type].spell}${b.spiritUsed[u.side] ? ' (spent)' : ''}` :
+      `${roleOf(u)} · routs below ${Math.round(routAt(u) * 100)}%`;
     head.appendChild(hd); tip.appendChild(head);
     const rows = el('div', 'bt-tip-rows');
     rows.innerHTML = `<span>Soldiers</span><b>${u.soldiers} / ${u.start}</b><span>Attack / Defence</span><b>${st.atk} / ${st.def}</b>
@@ -1360,7 +1427,8 @@ export async function runBattle(container, input, opts = {}) {
 
   async function spellSequence(e) {
     const sp = SPIRITS[e.spirit];
-    await spiritCutin(e.side, e.spirit);
+    if (prefs.cutins === 'full') await momentCutin(SPIRIT_CUTIN[e.spirit], sp.spell, `${sp.name} unleashes its power`, sp.color);
+    else { sfx.play('spell'); }
     showBanner(`${sp.name}: ${sp.spell}`, e.side);
     view.fx = { t0: view.now, dur: 1400 / speed(), cells: e.cells, spirit: e.spirit, bolts: e.spirit === 'gale' };
     view.shake = 8;
@@ -1494,7 +1562,7 @@ export async function runBattle(container, input, opts = {}) {
     if (view.mode === 'spell') {
       // touch: first tap previews, second tap on the same square casts
       if (e.pointerType !== 'mouse' && (!view.spellAt || view.spellAt.x !== c.x || view.spellAt.y !== c.y)) { view.spellAt = c; return; }
-      await act({ type: 'spell', side: b.side, target: c, dir: view.spellDir });
+      await act({ type: 'spell', unit: b.spiritUnit[b.side], side: b.side, target: c, dir: view.spellDir });
       return;
     }
     const sel = view.sel && getUnit(b, view.sel);
@@ -1601,7 +1669,7 @@ export async function runBattle(container, input, opts = {}) {
     if (bgIm) box.style.backgroundImage = `linear-gradient(rgba(10,8,14,0.35), rgba(10,8,14,0.75)), url("${art(BATTLE_MOMENT.intro)}")`;
     const leader = side => {
       const us = b.units.filter(u => u.side === side);
-      return us.find(isRuler) || us.filter(u => u.vassalId).sort((p, q) => q.soldiers - p.soldiers)[0] || us[0];
+      return us.find(isRuler) || us.filter(u => u.vassalId).sort((p, q) => q.soldiers - p.soldiers)[0] || us.find(u => !isSpirit(u)) || us[0];
     };
     const sideBlock = side => {
       const d = el('div', 'bt-intro-side bt-intro-' + side);
@@ -1638,6 +1706,11 @@ export async function runBattle(container, input, opts = {}) {
     box.classList.add('bt-intro-out');
     await wait(250);
     modal.hidden = true;
+    // The summoned spirits arrive.
+    for (const side of ['attacker', 'defender']) {
+      const su = spiritOf(b, side);
+      if (su && !su.out && b.round === 1 && b.side === 'attacker' && !b.spiritUsed[side]) await spiritCutin(side, su.type, true);
+    }
     const L = leader('attacker');
     if (L) showBark(L, 'start');
   }
