@@ -16,9 +16,13 @@
 import { TROOPS, COMPANIES, MILITIA, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from '../data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { makeRng } from '../rng.js';
-import { W, H, OBJ, TERRAIN, generateMap, idx } from './mapgen.js';
+import { W, H, OBJ, TERRAIN, generateField, idx, IMPASSABLE } from './mapgen.js';
 
 export { W, H, OBJ, TERRAIN };
+// Elevation (0-3) of a square; old saved battles have none (flat).
+export const elevAt = (b, x, y) => (b.elev ? b.elev[idx(x, y)] || 0 : 0);
+export const ELEV_BONUS = 0.10;      // striking down from higher ground +10%, up -10%
+export const LAVA_BURN = 0.03;       // units next to lava lose 3% a round (at the start of their side's turn)
 export const MAX_ROUNDS = 15;
 export const ROUT_FRACTION = ROUT_LED; // led units rout below 30% of their starting soldiers
 export { ROUT_LED, ROUT_LEADERLESS };
@@ -60,11 +64,12 @@ export function enemyOf(side) { return side === 'attacker' ? 'defender' : 'attac
 
 export function createBattle(input, seed = 1) {
   const siege = !!input.siege;
-  const grid = generateMap(input.terrain || 'plains', seed, siege);
+  const field = generateField(input.terrain || 'plains', seed, siege, { provinceId: input.provinceId, season: input.season });
+  const grid = field.grid;
   const b = {
     v: 2, seed, rng: (seed * 2654435761) >>> 0,
     provinceId: input.provinceId ?? null, terrain: input.terrain || 'plains', siege,
-    grid, round: 1, side: 'attacker', winner: null, reason: null,
+    grid, elev: field.elev, biome: field.biome, round: 1, side: 'attacker', winner: null, reason: null,
     season: input.season ?? null,
     weather: input.weather !== undefined ? input.weather : weatherFor(input.season, input.terrain || 'plains'),
     gateBreached: false,
@@ -113,7 +118,7 @@ export function createBattle(input, seed = 1) {
 function deploy(b, att, def) {
   const taken = new Set();
   const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H && !taken.has(idx(x, y)) &&
-    b.grid[idx(x, y)] !== 'mountain' && b.grid[idx(x, y)] !== 'water';
+    !IMPASSABLE.has(b.grid[idx(x, y)]) && b.grid[idx(x, y)] !== 'water';
   const place = (u, x, y) => { u.x = x; u.y = y; taken.add(idx(x, y)); };
 
   // Attackers: strongest in the middle of the west edge, ranged behind.
@@ -163,7 +168,7 @@ function tempWallAt(b, x, y) {
   return null;
 }
 
-export function terrainAt(b, x, y) { return b.grid[idx(x, y)]; }
+export function terrainAt(b, x, y) { return x >= 0 && y >= 0 && x < W && y < H ? b.grid[idx(x, y)] : null; }
 
 export function moveCost(b, u, x, y) {
   if (x < 0 || y < 0 || x >= W || y >= H) return Infinity;
@@ -171,7 +176,8 @@ export function moveCost(b, u, x, y) {
   if (tempWallAt(b, x, y)) return Infinity;
   const t = TERRAIN[b.grid[idx(x, y)]];
   if (t.cost === Infinity) return Infinity;
-  return u.ghost ? 1 : t.cost;
+  if (u.ghost) return 1;
+  return t.horseCost && CAVALRY.has(u.type) ? t.horseCost : t.cost;
 }
 
 // Defence multiplier for a unit standing where it stands.
@@ -245,6 +251,8 @@ export function attackRange(b, u) {
   if (!u) { u = b; b = null; }
   let r = statsOf(u.type).range;
   if (b && b.weather === 'fog' && r > 1) r = Math.max(2, r - 1);
+  // Shooting from high ground (elevation 2+, or cliffs) reaches one square further.
+  if (b && r > 1 && (elevAt(b, u.x, u.y) >= 2 || TERRAIN[b.grid[idx(u.x, u.y)]]?.high)) r += 1;
   return u.moved && r > 1 ? 1 : r;
 }
 
@@ -275,8 +283,15 @@ export function expectedKills(b, att, tgt, mult = 1, at = null) {
   const sa = statsOf(att.type), st = statsOf(tgt.type);
   const def = st.def * terrainDef(b, tgt, at ? at.x : tgt.x, at ? at.y : tgt.y) * DAMAGE_DIV;
   const k = att.soldiers * sa.atk * (1 + att.might / 200) * (0.7 + att.training / 333) * bonusAgainst(b, att, tgt) * mult *
-    (att.atkBonus || 1) / (def * (tgt.defBonus || 1));
+    (att.atkBonus || 1) * slopeBonus(b, att, tgt, at) / (def * (tgt.defBonus || 1));
   return Math.min(tgt.soldiers, k);
+}
+
+// Striking downhill +10%, uphill -10% (flyers ignore slopes).
+export function slopeBonus(b, att, tgt, at = null) {
+  if (att.flying || !b.elev) return 1;
+  const ea = elevAt(b, att.x, att.y), et = elevAt(b, at ? at.x : tgt.x, at ? at.y : tgt.y);
+  return ea > et ? 1 + ELEV_BONUS : ea < et ? 1 - ELEV_BONUS : 1;
 }
 
 function rollKills(b, rng, att, tgt, mult) {
@@ -320,6 +335,19 @@ function beginSide(b, side, events) {
       const amt = Math.min(f.start - f.soldiers, Math.round(f.start * heal));
       if (amt > 0) { f.soldiers += amt; events.push({ t: 'heal', unit: f.id, amount: amt }); }
     }
+  }
+  // Heat from lava seams scorches units standing next to them.
+  for (const u of b.units) {
+    if (u.out || u.side !== side || u.flying) continue;
+    const hot = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+      const x = u.x + dx, y = u.y + dy;
+      return x >= 0 && y >= 0 && x < W && y < H && b.grid[idx(x, y)] === 'lava';
+    });
+    if (!hot) continue;
+    const k = Math.max(1, Math.round(u.soldiers * LAVA_BURN));
+    events.push({ t: 'burn', unit: u.id, killed: k });
+    addLog(b, `${label(u)} is scorched by the lava (-${k}).`);
+    applyLoss(b, u, k, events);
   }
   // Confused units act on their own: stand still or strike a neighbour of their own side.
   for (const u of b.units) {

@@ -19,6 +19,7 @@ function sandbox(a, d, extra) {
   const b = createBattle(input(a, d, extra), 1);
   b.grid = b.grid.map(() => 'grass');
   b.grid[OBJ.y * W + OBJ.x] = 'keep';
+  b.elev = b.elev.map(() => 0);
   return b;
 }
 const place = (b, id, x, y) => { const u = getUnit(b, id); u.x = x; u.y = y; return u; };
@@ -29,7 +30,7 @@ for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for
   ok(g.length === W * H, 'grid size');
   ok(g[OBJ.y * W + OBJ.x] === 'keep', 'keep at objective');
   ok(g[5 * W + 12] === 'gate', 'gate in siege');
-  ok([0, 1, 2].every(x => [...Array(H).keys()].every(y => !['mountain', 'water'].includes(g[y * W + x]))), 'deploy zone clear ' + t);
+  ok([0, 1, 2].every(x => [...Array(H).keys()].every(y => !['mountain', 'water', 'lava'].includes(g[y * W + x]))), 'deploy zone clear ' + t);
 }
 
 // Damage formula matches DESIGN (with tuned divisor) and terrain reduces it.

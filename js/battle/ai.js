@@ -6,7 +6,7 @@
 // objective (attackers push for the keep, defenders hold the walls and the keep square).
 
 import {
-  W, OBJ, statsOf, reachable, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
+  W, OBJ, statsOf, reachable, elevAt, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
   dist, getUnit, canCast, spellCells, unitAt, routAt, MAX_ROUNDS, DIR_NAMES, terrainAt,
   moveRange, attackRange,
 } from './rules.js';
@@ -106,6 +106,12 @@ function cellScore(b, u, x, y, foes, side) {
   const ranged = st.range > 1;
   const tdef = terrainDef(b, u, x, y);
   s += (tdef - 1) * 25;
+  // Terrain awareness: high ground (archers love it, everyone strikes down better); stay off the
+  // squares next to lava.
+  if (!u.flying) {
+    s += elevAt(b, x, y) * (ranged ? 2 : 1);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (terrainAt(b, x + dx, y + dy) === 'lava') { s -= 18; break; }
+  }
   if (side === 'attacker') {
     const dObj = dist(at, OBJ);
     s -= dObj * (ranged ? 2 : 4) * (1 + b.round / MAX_ROUNDS);
@@ -126,7 +132,7 @@ function cellScore(b, u, x, y, foes, side) {
   if (ranged) {
     // Want an enemy in range next turn but not adjacent; fear melee.
     let inRange = false;
-    const rr = attackRange(b, { ...u, moved: false });
+    const rr = attackRange(b, { ...u, x, y, moved: false });   // high ground reaches further
     for (const f of foes) if (dist(at, f) <= rr) { inRange = true; break; }
     s += inRange ? 25 : 0;
     s -= threat * 60;
