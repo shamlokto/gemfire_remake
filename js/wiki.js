@@ -128,7 +128,7 @@ function howToPlay() {
   <tr><td><b>Supply</b></td><td>Send food and gold to a neighbouring province you own.</td><td>—</td></tr>
   <tr><td><b>Govern</b></td><td>Feast: 20 food for loyalty +8. Tax: gold equal to Market, loyalty −10.</td><td>food / loyalty</td></tr>
   <tr><td><b>Diplomacy</b></td><td>Truce, demand tribute, marriage pact, bribe an enemy vassal, or <a href="#wanderers">invite a wanderer</a> standing in or next to the province.</td><td>gold</td></tr>
-  <tr><td><b>Study</b></td><td>Scholars add ${studyPoints(0)}–${studyPoints(100)} <a href="#research">research</a> points (best Wits in the province helps) to a branch or your current research.</td><td>—</td></tr>
+  <tr><td><b>Study</b></td><td>Scholars add ${studyPoints(0)}–${studyPoints(100)} <a href="#research">research</a> points (best Wits in the province helps) to a branch or your current research. <i>Free: does not use the month's order, but your scholars can study at most three times a month.</i></td><td>—</td></tr>
   <tr><td><b>Trade grain</b></td><td>Buy or sell food at this month's price in a province with a working Market (300 food a month per Market). Prices follow the seasons (dear before the harvest, cheap right after it) with random swings, scares and gluts; heavy buying raises next month's price, selling lowers it. Buying costs about 12% above the middle price and selling pays 12% below. <i>Free: does not use the month's order.</i></td><td>gold or food</td></tr>
   <tr><td><b>Spy</b></td><td>Reveal a province's stats and garrison.</td><td>—</td></tr>
   <tr><td><b>Recruit</b></td><td>Try to win over a captive vassal.</td><td>—</td></tr>

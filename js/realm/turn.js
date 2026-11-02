@@ -365,6 +365,7 @@ export async function endMonth(state, opts = {}) {
     const orders = withRng(state, rng => planHouseOrders(state, h, rng));
     for (const o of orders) applyOrder(state, o);
     aiExtraBuilds(state, h);
+    aiStudies(state, h);
     initMarket(state);
     aiTrade(state, h, pr => Math.max(120, foodUpkeep(state, pr) * 6));
   }
@@ -496,4 +497,13 @@ function aiExtraBuilds(state, house) {
       if (!o || !applyOrder(state, o).ok) break;
     }
   }
+}
+
+// Study is a free action (up to STUDY_PER_MONTH a month): AI scholars study at the capital first,
+// then in other provinces with a vassal, using the wisest vassals.
+function aiStudies(state, house) {
+  const cap = state.houses[house].capital;
+  const ps = state.provinces.filter(p => p.owner === house && p.vassals.length)
+    .sort((a, b) => (b.id === cap) - (a.id === cap));
+  for (const pr of ps) if (!applyOrder(state, { province: pr.id, type: 'study' }).ok) break;
 }

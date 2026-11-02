@@ -181,14 +181,10 @@ function planProvince(state, house, pr, rng, ctx) {
     const d = develop(pr, foodTight, state, threatened);
     if (d) return d;
   }
-  // --- Study: scholars at the capital, or wherever there is nothing better to do ---
-  if (vs.length && ctx.studied < 2 && !threatened && (state.houses[house].capital === pid ? rng.chance(0.35) : rng.chance(0.15))) {
-    ctx.studied++;
-    return { province: pid, type: 'study' };
-  }
+  // (Study is a free action now: AI houses study in turn.js aiFreeActions, up to 3 a month.)
   if (green.length) return { province: pid, type: 'train' };
   if (pr.gold < 20 && pr.loyalty > (ctx.shards ? 75 : 60)) return { province: pid, type: 'govern', kind: 'tax' };
-  return vs.length && rng.chance(0.5) ? { province: pid, type: 'study' } : { province: pid, type: 'rest' };
+  return { province: pid, type: 'rest' };
 }
 
 // Troop type for a new unit, by what the province already has and can afford.

@@ -128,7 +128,7 @@ export function listOrders(state, pid) {
   add('spy', SPY_COST, done || noV || (pr.gold < SPY_COST ? `Needs ${SPY_COST} gold.` : null));
   add('recruit', 0, done || noV || (!captivesOf(state, house).length ? 'No captives.' : null));
   if (pr.units.length) add('disband', 0, done);
-  add('study', 0, done);
+  add('study', 0, studiesLeft(state, house) ? null : `Your scholars have studied ${STUDY_PER_MONTH} times this month.`);   // free action, 3 a month
   // Trading is a free action, available wherever a Market building works.
   if (landOf(state, pid)) add('trade', 0, tradeCap(state, pid) ? (tradeRoom(state, pid) ? null : 'The merchants here are done for the month.') : 'Build a Market here to trade.');
   add('rest', 0, done);
@@ -227,6 +227,12 @@ export function applyOrder(state, order) {
   // province can pay for. It does not use the province's monthly order.
   if (order.type === 'build') { const r = applyBuild(state, pid, order); betaTopUp(state); return r; }
   if (order.type === 'trade') return trade(state, pid, order.food);
+  if (order.type === 'study') {
+    if (!studiesLeft(state, house)) return fail(`Your scholars have studied ${STUDY_PER_MONTH} times this month.`);
+    const r = HANDLERS.study(state, pr, house, order, provinceVassals(state, pid));
+    if (r.ok) state.houses[house].studied = (state.houses[house].studied || 0) + 1;
+    return r;
+  }
   // Inviting wanderers is free too: invite as many as you can afford (and have room for) each month.
   if (order.type === 'diplomacy' && order.kind === 'wanderer') {
     if (!provinceVassals(state, pid).length) return fail('Needs a vassal in the province.');
@@ -494,6 +500,15 @@ export function spyReport(state, pid) {
 }
 
 // Resets the per-month order flags (turn.js calls this when the month advances).
-export function resetOrders(state) { for (const p of state.provinces) p.ordered = false; }
+// Study is a free action (it does not use the province's order), limited per house per month.
+export const STUDY_PER_MONTH = 3;
+export function studiesLeft(state, house) {
+  const h = state.houses[house];
+  return h ? Math.max(0, STUDY_PER_MONTH - (h.studied || 0)) : 0;
+}
+export function resetOrders(state) {
+  for (const p of state.provinces) p.ordered = false;
+  for (const h of Object.values(state.houses)) h.studied = 0;
+}
 
 export { isPlayerControlled };

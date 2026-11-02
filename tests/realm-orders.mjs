@@ -21,7 +21,7 @@ test('one order per province per month; assign is free', () => {
   const s = newGame('aldmere', 1);
   assert.ok(applyOrder(s, { province: 8, type: 'develop', kind: 'fields' }).ok);
   assert.equal(applyOrder(s, { province: 8, type: 'develop', kind: 'market' }).ok, false);
-  assert.ok(listOrders(s, 8).filter(o => o.type !== 'build' && o.type !== 'trade').every(o => o.disabled));   // building and trading are free actions;
+  assert.ok(listOrders(s, 8).filter(o => !['build', 'trade', 'study'].includes(o.type)).every(o => o.disabled));   // building, trading and study are free actions;
   const free = s.provinces[8].units.find(u => !u.leader);
   const r = applyOrder(s, { province: 8, type: 'assign', unit: free.uid, vassal: 'aldmere_4' });
   assert.ok(r.ok, r.msg);
