@@ -592,11 +592,13 @@ export function openLandView(container, land, opts = {}) {
     const y = provinceYield(L, ctx);
     $('.lv-season').textContent = ` · ${SEASON_NAMES[seasonOf(ctx.month)]}`;
     const net = y.food - y.foodUpkeep;
+    // ctx.realm (from the game): show yields in the realm's terms (treasury gold, soldiers per muster).
+    const R = ctx.realm;
     $('.lv-stats').innerHTML = [
-      ['Harvest', `${y.food}`, `${net >= 0 ? '+' : ''}${net} after the people eat`],
-      ['Gold', `${fmt(y.gold)}/mo`, ''],
+      ['Harvest', `${y.food}`, R ? 'each autumn' : `${net >= 0 ? '+' : ''}${net} after the people eat`],
+      ['Gold', `${fmt(R ? y.gold * R.goldMul : y.gold)}/mo`, ''],
       ['People', `${y.pop}`, `labour ${Math.round(y.labour * 100)}%`],
-      ['Muster cap', `${y.musterCap}`, ''],
+      R ? ['Muster', `${Math.max(30, Math.floor(y.musterCap / 30) * 10)}`, 'per order'] : ['Muster cap', `${y.musterCap}`, ''],
       ['Loyalty', `${y.loyaltyMod >= 0 ? '+' : ''}${y.loyaltyMod}`, ''],
       ['Defence', `+${Math.round(y.defense * 100)}%`, ''],
     ].map(([k, v, s]) => `<span class="lv-stat"><i>${k}</i><b>${v}</b>${s ? `<em>${s}</em>` : ''}</span>`).join('');
@@ -619,7 +621,8 @@ export function openLandView(container, land, opts = {}) {
     const opts2 = readOnly ? [] : listBuildable(L, x, y, ctx);
     const b = L.b[i];
     const sign = v => (v > 0 ? '+' : '') + v;
-    const prev = p => p ? [p.food && `${sign(p.food)} food`, p.gold && `${sign(p.gold)} gold`, p.pop && `${sign(p.pop)} people`, p.loyalty && `${sign(p.loyalty)} loyalty`, p.defense && `${sign(Math.round(p.defense * 100))}% def`].filter(Boolean).join(' · ') : '';
+    const gm = ctx.realm ? ctx.realm.goldMul : 1;
+    const prev = p => p ? [p.food && `${sign(p.food)} food`, p.gold && `${sign(Math.round(p.gold * gm * 10) / 10)} gold`, p.pop && `${sign(p.pop)} people`, p.loyalty && `${sign(p.loyalty)} loyalty`, p.defense && `${sign(Math.round(p.defense * 100))}% def`].filter(Boolean).join(' · ') : '';
     let html = `<div class="lv-pal-head"><div>${tileInfo(i)}</div><button class="lv-btn lv-close" aria-label="Close">✕</button></div>`;
     if (!readOnly && b && b !== B.KEEP) {
       html += `<div class="lv-pal-row">`;

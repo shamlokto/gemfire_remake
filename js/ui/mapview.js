@@ -6,6 +6,7 @@ import { SPIRITS } from '../data/spirits.js';
 import { art, hasArt, SEASON_MAP, CREST } from '../data/art.js';
 import { landShapes, LAND_EDGES, SEA_LANES, LAND_PALETTE, RADIUS } from './landshape.js';
 import { canSee } from '../realm/state.js';
+import { landQuality } from '../realm/landhooks.js';
 
 const imgCache = new Map();
 function img(slot) {
@@ -169,7 +170,8 @@ export class MapView {
     const exits = (PROVINCES[pid] && NEIGH[pid].length === 1) ? ' · dead end' : '';
     this.tip.innerHTML = `<b>${P.name}</b> · ${owner}<br><span style="color:var(--muted)">${P.terrain}${exits}` +
       (seen ? garrison : ' · unseen') +
-      (pr.shard && seen ? ` · ${SPIRITS[pr.shard].name} shard` : '') + '</span>';
+      (pr.shard && seen ? ` · ${SPIRITS[pr.shard].name} shard` : '') +
+      (seen && landQuality(st, pid) ? `<br><span class="land-quality q-${landQuality(st, pid)}" style="margin:3px 0 0">${landQuality(st, pid)} land</span>` : '') + '</span>';
     this.tip.hidden = false;
     const tw = this.tip.offsetWidth;
     this.tip.style.left = Math.min(x, this.w - tw - 24) + 'px';

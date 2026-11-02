@@ -7,7 +7,8 @@ import { TROOPS, COMPANIES } from './data/units.js';
 import { STORY } from './data/events.js';
 import { SCENARIOS, SCENARIO_BY_ID } from './data/scenarios.js';
 import { art, loadArtManifest, ENDING, BATTLE_BACKDROP, ORDER_BACKDROP } from './data/art.js';
-import { newGame, ownedProvinces, houseTotals } from './realm/state.js';
+import { newGame, ownedProvinces, houseTotals, withRng } from './realm/state.js';
+import { applyLoot } from './realm/landhooks.js';
 import { applyOrder } from './realm/orders.js';
 import { endMonth } from './realm/turn.js';
 import { MapView } from './ui/mapview.js';
@@ -45,7 +46,7 @@ const app = {
     order.house = this.state.player;
     const r = applyOrder(this.state, order);
     if (!r.ok) { sfx('error'); toast(r.msg, true); return r; }
-    sfx(order.type === 'march' ? 'march' : order.type === 'develop' || order.type === 'hire' ? 'coin' : 'click');
+    sfx(order.type === 'march' ? 'march' : order.type === 'develop' || order.type === 'build' || order.type === 'hire' ? 'coin' : 'click');
     toast(r.msg, r.success === false);
     if (r.report) showSpyReport(r.report);
     this.refresh();
@@ -67,7 +68,19 @@ const app = {
       if (this.current !== 'realm') this.show('realm');
       // Events
       const evs = st.pendingEvents.splice(0);
-      for (const ev of evs) await eventCard(ev);
+      for (const ev of evs) {
+        if (ev.kind === 'loot') {
+          // Sack a conquered province or spare it (js/realm/landhooks.js applyLoot).
+          const choice = await eventCard({ ...ev, choices: [{ label: 'Loot it', value: 'loot' }, { label: 'Spare it', value: 'spare' }] });
+          if (choice === 'loot' && st.provinces[ev.province].owner === st.player) {
+            const r = withRng(st, rng => applyLoot(st, ev.province, rng));
+            sfx('coin');
+            toast(`Your soldiers carry off ${r.gold} gold. The people will not forget.`);
+          }
+          continue;
+        }
+        await eventCard(ev);
+      }
       if (st.winner || st.defeated) { this.endGame(); return; }
       await monthCurtain(MONTHS[st.month], `${SEASONS[seasonOf(st.month)]}, year ${st.year}`, 1000);
       hideCurtain();

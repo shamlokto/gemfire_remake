@@ -36,14 +36,16 @@ export function modal(build, { wide = false, cls = '', dismissable = true, backd
   });
 }
 
-// Story / random event card with scene art.
+// Story / random event card with scene art. ev.choices: [{ label, value }] -> resolves to the value.
 export function eventCard(ev) {
   sfx('page');
   return modal(close => h('div',
     h('div.scene', { style: { backgroundImage: `url(${art(ev.art || 99)})` } }),
     h('div.modal-head', h('h2', ev.title || 'News')),
     h('div.modal-body', ...(String(ev.text || '').split('\n').map(p => h('p', p)))),
-    h('div.modal-foot', h('button.btn.primary', { onclick: () => { sfx('click'); close(true); } }, 'Continue'))),
+    h('div.modal-foot', ...(ev.choices
+      ? ev.choices.map((c, i) => h('button.btn' + (i === ev.choices.length - 1 ? '.primary' : ''), { onclick: () => { sfx('click'); close(c.value); } }, c.label))
+      : [h('button.btn.primary', { onclick: () => { sfx('click'); close(true); } }, 'Continue')]))),
   { wide: true, cls: 'event-card' });
 }
 

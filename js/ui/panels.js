@@ -18,15 +18,17 @@ import {
 import { TECHS, TECH_BY_ID, BRANCHES, BRANCH_IDS, techsOf } from '../data/tech.js';
 import { listOrders, musterCost, musterLimit, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions, hireOptions } from '../realm/orders.js';
 import { forecast } from '../realm/economy.js';
+import { landOf, yieldOf, landQuality, landPotential, landCtx } from '../realm/landhooks.js';
+import { openLandView } from './landview.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
 import { modal, toast } from './events.js';
 import { sfx } from './audio.js';
 
 const SEASON_BANNER = [4, 5, 6, 7];
-const ORDER_ICON = { develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', study: '📜', rest: '☾' };
+const ORDER_ICON = { build: '⚒', develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', study: '📜', rest: '☾' };
 const ORDER_HINT = {
-  develop: 'Fields, market or dikes', govern: 'Feast or tax', muster: 'Raise soldiers', train: 'Drill the troops',
+  build: 'Farms, houses, markets…', develop: 'Fields, market or dikes', govern: 'Feast or tax', muster: 'Raise soldiers', train: 'Drill the troops',
   hire: 'Sign a company', dismiss: 'Pay off the company', march: 'Move or attack', supply: 'Send food and gold',
   diplomacy: 'Truce, pact, bribe, wanderers', spy: 'Scout a province', recruit: 'Win over a captive', disband: 'Send a unit home',
   study: 'Research a tech', rest: 'Do nothing',
@@ -159,7 +161,13 @@ export class RealmUI {
     const mine = pr.owner === st.player;
     const seen = canSee(st, st.player, pid);
     const frag = h('div');
-    frag.append(h('div', { style: { margin: '-14px -14px 10px', height: '120px', backgroundImage: `url(${art(PROVINCE_VIGNETTE(pid))})`, backgroundSize: 'cover', backgroundPosition: 'center', maskImage: 'linear-gradient(180deg,#000 55%,transparent)', WebkitMaskImage: 'linear-gradient(180deg,#000 55%,transparent)' } }));
+    const hasLand = !!landOf(st, pid);
+    const landSeen = hasLand && (mine || seen);
+    frag.append(h('div.prov-vignette', { style: { margin: '-14px -14px 10px', height: '120px', position: 'relative', backgroundImage: `url(${art(PROVINCE_VIGNETTE(pid))})`, backgroundSize: 'cover', backgroundPosition: 'center' } },
+      h('div.vig-fade'),
+      landSeen ? h('button.btn.land-btn' + (mine ? '.primary' : ''), { title: mine ? 'Open the land: build farms, houses, markets…' : 'View this land',
+        onclick: () => { sfx('click'); this.openLand(pid); } }, mine ? '⚒ Land' : '👁 Land') : null,
+      landSeen && landQuality(st, pid) ? h('span.land-quality.q-' + landQuality(st, pid), landQuality(st, pid)) : null));
     const gov = seen ? governorOf(st, pid) : null;
     frag.append(h('div.prov-head',
       gov ? portrait(gov.id, { size: 60 }) : (pr.owner ? crestImg(pr.owner, 56) : null),
@@ -182,9 +190,24 @@ export class RealmUI {
       pr.owner ? res('Soldiers', soldiersOf(pr)) : res('Militia', militiaOf(pr))));
 
     const bars = h('div.stats');
-    const bar = (lbl, v, cls = '') => bars.append(h('span.lbl', lbl), h('div.bar' + (cls ? '.' + cls : ''), h('i', { style: { width: v + '%' } })), h('span', v));
-    bar('Fields', pr.fields); bar('Market', pr.market); bar('Dikes', pr.dikes, 'dike'); bar('Loyalty', pr.loyalty, 'loy');
-    frag.append(h('div.parchment', { style: { '--parchment-img': `url(${art(3)})` } }, bars));
+    const bar = (lbl, v, cls = '') => bars.append(h('span.lbl', lbl), h('div.bar' + (cls ? '.' + cls : ''), h('i', { style: { width: Math.min(100, v) + '%' } })), h('span', v));
+    const y = hasLand ? yieldOf(st, pid) : null;
+    if (y) {
+      const pot = landPotential(st, pid);
+      const cell = (k, v, t) => h('div.ly', { title: t || '' }, h('span', k), h('b', v));
+      frag.append(h('div.parchment.land-yield', { style: { '--parchment-img': `url(${art(3)})` } },
+        h('div.ly-grid',
+          cell('Harvest', fmt(y.food), `Food each autumn from farms, orchards, pastures and fisheries. The land could grow about ${fmt(pot.food)}.`),
+          cell('Gold', `${Math.round(y.gold * 0.6 * (0.5 + pr.loyalty / 200))}/mo`, 'Taxes, markets, mines and trade, before wages and troop pay'),
+          cell('People', fmt(y.pop), 'Houses give people; buildings need hands'),
+          cell('Labour', Math.round(y.labour * 100) + '%', y.labour < 1 ? 'Not enough hands: every building works slower. Build houses.' : 'Every building is fully worked'),
+          cell('Muster', `${Math.max(30, Math.floor(y.musterCap / 30) * 10)}/order`, `Soldiers one muster can raise here (people: ${fmt(y.musterCap)})`),
+          cell('Defence', '+' + Math.round(y.defense * 100) + '%', 'Keep and walls: defenders fight harder')),
+        (bar('Dikes', pr.dikes, 'dike'), bar('Loyalty', pr.loyalty, 'loy'), bars)));
+    } else {
+      bar('Fields', pr.fields); bar('Market', pr.market); bar('Dikes', pr.dikes, 'dike'); bar('Loyalty', pr.loyalty, 'loy');
+      frag.append(h('div.parchment', { style: { '--parchment-img': `url(${art(3)})` } }, bars));
+    }
 
     // troop units
     const vs = provinceVassals(st, pid);
@@ -248,6 +271,46 @@ export class RealmUI {
 
   dlg_rest(pid) { return { type: 'rest', province: pid }; }
   dlg_dismiss(pid) { return { type: 'dismiss', province: pid }; }
+
+  // The build order opens the land view.
+  dlg_build(pid) { this.openLand(pid); return null; }
+
+  // Full-screen land view (js/ui/landview.js). Own land: click a tile to build (the province's
+  // order for the month); foreign land: look only.
+  openLand(pid) {
+    const st = this.state, pr = st.provinces[pid];
+    const land = landOf(st, pid);
+    if (!land) return;
+    const mine = pr.owner === st.player;
+    const wrap = h('div.land-overlay');
+    const box = h('div.land-box');
+    const close = () => { view.destroy(); wrap.remove(); document.removeEventListener('keydown', onKey); this.app.refresh(); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    const status = h('div.land-status');
+    const note = () => {
+      status.textContent = !mine ? `${HOUSE_BY_ID[pr.owner]?.name || 'A free hold'}'s land: you can look, not build.` :
+        pr.ordered ? 'This province has acted this month: new building waits for next month.' :
+        `Click a tile to build. One building or project a month · ${fmt(pr.gold)} gold here.`;
+    };
+    wrap.append(h('div.land-bar', h('h2', `${PROVINCES[pid].name}`, landQuality(st, pid) ? h('span.land-quality.q-' + landQuality(st, pid), landQuality(st, pid)) : null), status,
+      mine ? h('button.btn', { onclick: () => { sfx('click'); close(); this.app.apply({ type: 'build', province: pid, kind: 'dikes' }); }, title: 'Raise the dikes against floods (30 gold, uses the month)' }, `Dikes ${pr.dikes}`) : null,
+      h('button.btn.primary', { onclick: close }, 'Close')), box);
+    document.body.append(wrap);
+    document.addEventListener('keydown', onKey);
+    const view = openLandView(box, land, {
+      province: PROVINCES[pid], house: pr.owner ? HOUSE_BY_ID[pr.owner] : null,
+      ctx: { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) } }, readOnly: !mine || pr.ordered,
+      onBuild: ({ x, y, kind }) => {
+        const r = this.app.apply({ type: 'build', province: pid, x, y, kind });
+        view.update(land, { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) } });
+        note();
+        if (r.ok) setTimeout(close, 900);
+        return r;
+      },
+    });
+    view.setMonth(st.month);
+    note();
+  }
 
   dlg_develop(pid) {
     const st = this.state, pr = st.provinces[pid];

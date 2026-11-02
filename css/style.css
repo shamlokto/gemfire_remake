@@ -388,3 +388,27 @@ p.warn { color: #f0a070; background: rgba(160,60,30,0.15); border: 1px solid rgb
 /* ---------- wanderers ---------- */
 .wanderer-tag { display: inline-block; font-size: 11px; letter-spacing: .06em; color: var(--accent-2); border: 1px solid var(--line);
   border-radius: 999px; padding: 0 7px; margin-left: 6px; font-family: var(--font-display); }
+
+/* ---------- province land (js/ui/landview.js overlay, panel summary) ---------- */
+.prov-vignette .vig-fade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 45%, var(--panel, #1f1a14)); pointer-events: none; }
+.prov-vignette .land-btn { position: absolute; right: 12px; bottom: 10px; padding: 6px 14px; font-size: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+.land-quality { display: inline-block; font-family: var(--font-display, serif); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; background: rgba(0,0,0,.45); vertical-align: middle; margin-left: 8px; }
+.prov-vignette .land-quality { position: absolute; left: 12px; bottom: 12px; margin: 0; }
+.land-quality.q-breadbasket { color: #f2cf5b; } .land-quality.q-fertile { color: #9fd36a; }
+.land-quality.q-modest { color: #c9b98f; } .land-quality.q-barren { color: #c98a6a; }
+.land-yield .ly-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; margin-bottom: 8px; }
+.land-yield .ly { display: flex; flex-direction: column; line-height: 1.15; }
+.land-yield .ly span { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
+.land-yield .ly b { font-size: 16px; }
+.land-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(8, 6, 10, .92); display: flex; flex-direction: column; animation: lvfade .25s ease; }
+@keyframes lvfade { from { opacity: 0; } to { opacity: 1; } }
+.land-overlay .land-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line, #3d3326); flex-wrap: wrap; }
+.land-overlay .land-bar h2 { margin: 0; font-family: var(--font-display, serif); color: var(--accent, #d9a94a); font-size: 20px; }
+.land-overlay .land-status { flex: 1; min-width: 180px; color: var(--muted, #a99a7c); font-style: italic; }
+.land-overlay .land-box { flex: 1; min-height: 0; position: relative; }
+@media (max-width: 640px) {
+  .land-yield .ly-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .land-overlay .land-bar { padding: 8px 12px; gap: 8px; }
+  .land-overlay .land-bar h2 { font-size: 17px; }
+}

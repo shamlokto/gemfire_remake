@@ -46,10 +46,11 @@ export const SCENARIOS = [
     },
     garrison: [['footmen', 200], ['archers', 160]],
     scale: 1.4,
+    goldMult: { isolde: 0.6 },   // her fleets have drained the treasury
     techs: {
       corvane: ['drill_yards', 'smithing', 'attunement', 'warding'],
       seraphine: ['attunement', 'warding', 'crop_rotation', 'granaries', 'drill_yards'],
-      isolde: ['markets', 'guild_charters', 'harbour_fleets', 'caravans', 'crop_rotation'],
+      isolde: ['markets', 'guild_charters', 'harbour_fleets', 'crop_rotation'],
       aldmere: ['crop_rotation', 'drill_yards'], hrothgar: ['drill_yards', 'fortification'], vey: ['crop_rotation', 'attunement'],
     },
     charge: 60,

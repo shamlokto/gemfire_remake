@@ -37,6 +37,9 @@ SECTION = {
     'P': (WIDE + ' Triumphant.', '16:9'), 'Q': ('Wide interior or scene, no people in the foreground.', '21:9'),
     'R': (CUTIN, '21:9'), 'S': ('The spirit appearing over a battlefield, huge, troops below for scale. ' + WIDE, '21:9'),
     'T': (WIDE, '21:9'), 'U': (FX + ' Full frame.', '1:1'), 'V': (FLAT, '1:1'),
+    'W': ('Small wide painting of the place.', '16:9'),     # island provinces 231-234
+    'X': (PORTRAIT, '3:4'),                                   # wanderers and heirs 235-270
+    'Y': (CUTIN, '21:9'),                                     # clash cut-ins for new companies 271-278
 }
 SLOT_ASPECT = {3: '1:1', 4: '5:2', 5: '5:2', 6: '5:2', 7: '5:2', 12: '1:1', 13: '1:1', 14: '1:1', 15: '1:1'}
 SLOT_EXTRA = {

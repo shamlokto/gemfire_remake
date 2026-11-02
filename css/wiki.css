@@ -159,3 +159,5 @@ details.group .body { padding: 0 14px 14px; }
 @media (max-width: 760px) { .places { grid-template-columns: repeat(2, minmax(0, 1fr)); } .crest { width: 48px; height: 48px; } }
 .mapbox text.ship { font-size: 18px; stroke-width: 0; fill: #f6efd8; }
 .xtable i.dim { color: var(--w-muted); }
+.lq { font-family: var(--w-display); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; }
+.lq.q-breadbasket { color: #f2cf5b; } .lq.q-fertile { color: #9fd36a; } .lq.q-modest { color: #c9b98f; } .lq.q-barren { color: #c98a6a; }

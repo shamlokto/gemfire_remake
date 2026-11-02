@@ -200,3 +200,20 @@ Victory: `VICTORY_PROVINCES` = 20 provinces, or all 5 shards. Each province has 
   `wandering` (house null, location) or `future` (dueTurn). Diplomacy kind `wanderer` invites one
   in or next to the province; conquest may recruit those in the province; heirs join at the capital.
 * **Companies**: 8 more (`requires`, `monster`, `terrainBonus`, `loyaltyHit`, wage 0 traits).
+
+## v3: province land drives the economy (js/realm/landhooks.js)
+* `state.land[pid]` (js/land, docs/LAND.md) for all 28 provinces, created in `newGame` and topped up
+  with the land's own builder so owned provinces start at their old fields/market (free holds stay
+  natural). Scenario development: Raven 1.2, Two Crowns 1.25, Last Shard 1.7.
+* Economy: monthly gold = land gold x 0.6 x loyalty factor x techs; harvest = land food x loyalty
+  factor x techs; loyalty target + land loyaltyMod; barracks training; winter spoilage of food above
+  150 + granary storage; `monthTick` advances construction. `province.fields/market` are derived
+  (legacyStats) for display, research points and the tax order.
+* Orders: `build {province, x, y, kind}` (building, project, repair, demolish, or kind 'dikes')
+  replaces `develop` (still accepted: maps onto the land). One muster raises at most
+  max(30, musterCap/3) soldiers; pastures cut horse/knight costs, ore cuts siege costs.
+* Techs on the land: Irrigation farms +10%, Guild Charters builds -10%, Fortification walls +5%.
+* Battles: defenders' defBonus x (1 + land defence). Conquest damages the land by battle intensity;
+  the player gets a Loot / Spare choice (pendingEvents kind 'loot'), AI houses decide (raiders loot
+  more; shard holders and breadbaskets are spared).
+* AI: builds with suggestBuild by temperament and need; rates targets by land potential.

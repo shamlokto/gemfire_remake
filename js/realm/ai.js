@@ -23,12 +23,12 @@ export const TUNING = {
   attackRatio: 1.4,        // our power / their defence needed to attack a house
   freeholdRatio: 1.3,      // ... a free hold
   followUp: 0.6,           // share of a queued attack's power assumed to wear the target down
-  seaLaneExtra: 0.15,      // extra margin to attack across a sea lane
+  seaLaneExtra: 0.0,       // extra margin to attack across a sea lane
   minMarchSoldiers: 100,   // a unit joins an attack only with this many soldiers
   minMarchTraining: 35,
   aggression: 0.6,         // chance per province per month to consider attacking a house
   raiseGold: 160,          // gold (after reserve) before raising a new unit in peacetime
-  coalition: 0.2,          // attack margin given up against the leading house (balance of power)
+  coalition: 0.35,         // attack margin given up against the leading house (balance of power)
   closingProvinces: 12,    // a house with this many provinces always considers attacking ...
   closingBonus: 0.25,      // ... and accepts this much less margin
   finishingProvinces: 16,  // past this, the margin drops again (the last holdouts must fall)

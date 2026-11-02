@@ -11,6 +11,8 @@ import { DIPLOMACY } from './realm/diplomacy.js';
 import { TROOPS, COMPANIES, MILITIA, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from './data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from './data/spirits.js';
 import { RANDOM_EVENTS, STORY } from './data/events.js';
+import { TERRAIN, RESOURCE, BUILDING, PROJECT, Y as LY, potential } from './land/land.js';
+import { generateLand } from './land/landgen.js';
 import { SLOTS, loadArtManifest, art, hasArt, pad3, CREST, PROVINCE_VIGNETTE, CLASH_CUTIN, SPIRIT_CUTIN } from './data/art.js';
 
 const $ = id => document.getElementById(id);
@@ -91,14 +93,14 @@ function howToPlay() {
   <p>One turn is one month; twelve months make a year and three months a season. The game begins in ${esc(MONTHS[0])},
   year ${START_YEAR}.</p>
   <ul class="pills">${months}</ul>
-  <p>Each month you give <b>one order to every province you own</b>. A province with no vassal in it can only Develop
-  or Govern. Then every rival house gives its orders, marches are fought out as battles (houses take turns, starting
+  <p>Each month you give <b>one order to every province you own</b>. Building on the land, mustering, training and
+  governing need no vassal; diplomacy, spying and attacks do. Then every rival house gives its orders, marches are fought out as battles (houses take turns, starting
   from a different house each month), and finally the economy ticks: income, upkeep, the harvest and random events.</p>
 
   ${sec('orders', 'Orders', 'How to play')}
   <div class="xwrap"><table class="xtable">
   <tr><th>Order</th><th>What it does</th><th>Cost</th></tr>
-  <tr><td><b>Develop</b></td><td>Raise Fields (food), Market (gold) or Dikes (flood defence) by 4 + governor's Wits / 20, up to 100.</td><td>30 gold</td></tr>
+  <tr><td><b>Build</b></td><td>Start one building or project on the province's <a href="#land">land</a> (farm, houses, market, mill, granary, temple, walls…, clearing forest, draining marsh), or raise the dikes.</td><td>20–70 gold</td></tr>
   <tr><td><b>Muster</b></td><td>Raise a new troop unit of any type, or reinforce one (max ${MAX_SOLDIERS} soldiers per unit, ${MAX_UNITS_PER_PROVINCE} units per province). New units have no leader.</td><td>troop cost per 10 soldiers; loyalty −2</td></tr>
   <tr><td><b>Train</b></td><td>Drill one unit or the whole garrison: training +10 + leader's Might / 10 (+8 with no leader), up to 100. Training multiplies damage.</td><td>—</td></tr>
   <tr><td><b>Assign leader</b></td><td>Put a vassal at the head of a unit, or take them off it. <i>Free: does not use the month's order.</i></td><td>—</td></tr>
@@ -117,12 +119,13 @@ function howToPlay() {
   ${sec('economy', 'Economy, seasons and harvest', 'How to play')}
   <p>Every province earns gold each month and food once a year, at the harvest (month 7, ${esc(MONTHS[6])}).
   Loyal people work harder:</p>
-  <code class="formula">gold per month  = Market × 0.6 × (0.5 + loyalty / 200)
-harvest food    = Fields × 10 × (0.5 + loyalty / 200)
+  <code class="formula">gold per month  = land gold × 0.6 × (0.5 + loyalty / 200)     (taxes, markets, mines…)
+harvest food    = land harvest × (0.5 + loyalty / 200)        (farms, orchards, fisheries…)
 food upkeep     = Σ soldiers × troop upkeep / 100     (every month)
 company wages   = paid in gold every month</code>
   <p>If food runs out, troops lose 10% of their soldiers and loyalty drops by 10. If gold runs out, hired companies
-  desert. Winter is when hungry provinces break: plan the harvest to last until next autumn.</p>
+  desert. Winter is when hungry provinces break: plan the harvest to last until next autumn. At the start of winter,
+  food beyond what the province can store (150, plus 200 per granary) partly spoils.</p>
   <p>New provinces start with Fields ${PROVINCE_DEFAULTS.fields}, Market ${PROVINCE_DEFAULTS.market},
   Dikes ${PROVINCE_DEFAULTS.dikes}, loyalty ${PROVINCE_DEFAULTS.loyalty}, ${PROVINCE_DEFAULTS.food} food and
   ${PROVINCE_DEFAULTS.gold} gold; each house's own provinces start better (see <a href="#houses">Houses</a>).</p>
@@ -501,10 +504,46 @@ function makeSortable(root) {
   }
 }
 
+// ---------- the land (js/land) ----------
+function landSec() {
+  const pots = PROVINCES.map(p => {
+    const runs = [1, 2, 3].map(seed => potential(generateLand(p.id, seed, { start: false })));
+    const food = Math.round(runs.reduce((a, r) => a + r.food, 0) / runs.length);
+    const gold = Math.round(runs.reduce((a, r) => a + r.gold, 0) / runs.length);
+    return { p, food, gold };
+  }).sort((a, b) => b.food - a.food);
+  const q = f => (f >= 900 ? 'breadbasket' : f >= 500 ? 'fertile' : f >= 250 ? 'modest' : 'barren');
+  const soils = TERRAIN.map(t => `<tr><td>${esc(t.name)}</td><td class="num">${t.soil ? '×' + t.soil : '—'}</td></tr>`).join('');
+  const blds = BUILDING.filter(b => b.key !== 'none').map(b => `<tr><td><b>${esc(b.name)}</b></td><td class="num">${b.cost || '—'}</td><td class="num">${b.time || '—'}</td><td class="num">${b.labour || 0}</td><td>${esc(b.text)}</td></tr>`).join('');
+  const projs = Object.values(PROJECT).map(pr => `<tr><td><b>${esc(pr.name)}</b></td><td class="num">${pr.cost}</td><td class="num">${pr.time}</td><td>${esc(pr.text)}</td></tr>`).join('');
+  const res = RESOURCE.filter(r => r.key !== 'none').map(r => `<li><b>${esc(r.name)}</b>: ${esc(r.text)}</li>`).join('');
+  const rows = pots.map(({ p, food, gold }) => `<tr><td><a href="#prov-${p.id}">${esc(p.name)}</a></td><td>${p.terrain}</td><td class="num">${food}</td><td class="num">${gold}</td><td><span class="lq q-${q(food)}">${q(food)}</span></td></tr>`).join('');
+  return `${sec('land', 'The land', 'The realm')}
+  <p>Every province has its own land: a 12 × 9 grid of soil, forest, hills, rock, marsh, rivers and sea, with a few special
+  resources. What a province yields comes from <b>what is built on its land</b>, so good land matters: a fully farmed river
+  plain feeds several times what a rocky isle can. Each month a province may start <b>one building or project</b> (the
+  <i>Build</i> order, from the <b>⚒ Land</b> button); construction takes one to three months.</p>
+  <ul>
+    <li><b>Farms</b> grow ${LY.farm} food × the soil; next to a river or lake they are irrigated (+${LY.irrigation * 100}%), next to a mill +${LY.millBoost * 100}%.</li>
+    <li><b>People</b> come from houses (${LY.housesPop} each) and the keep. Every building needs hands: short of people, <i>all</i> the land works slower. People pay taxes and set how many soldiers one muster can raise (a third of ${LY.musterBase} + ${LY.musterPerPop} per person).</li>
+    <li><b>Markets</b> earn more next to houses; beyond three, trade is saturated. <b>Granaries</b> keep food safe through winter (unstored food spoils). <b>Temples</b> raise loyalty, which drives every yield and the shards' charge.</li>
+    <li><b>Keep and walls</b> make defenders fight harder (+10% for the keep, +5% per wall near it, up to +50%). <b>Pastures</b> make horse and knights cheaper, rich <b>ore</b> makes siege engines cheaper, <b>barracks</b> drill the troops every month.</li>
+    <li><b>War scars the land.</b> When a province falls, the fighting damages buildings (sieges worse; farms burn first), and the conqueror may <b>loot</b> it: gold at once, but markets, houses and granaries are wrecked and loyalty falls by 25. Damaged buildings produce nothing until repaired.</li>
+  </ul>
+  <div class="xwrap"><table class="xtable"><tr><th>Soil</th><th>Farm ×</th></tr>${soils}</table></div>
+  <div class="xwrap"><table class="xtable"><tr><th>Building</th><th>Gold</th><th>Months</th><th>Hands</th><th>Effect</th></tr>${blds}</table></div>
+  <div class="xwrap"><table class="xtable"><tr><th>Project</th><th>Gold</th><th>Months</th><th>Effect</th></tr>${projs}</table></div>
+  <p><b>Special resources</b></p><ul>${res}</ul>
+  <h3 style="margin-top:14px">Breadbaskets and barren land</h3>
+  <p>The most a province's land could grow if every soil tile were farmed (average of three maps), and the gold its
+  mines, vineyards and pearl beds could add. Conquer the river plains for bread; the barren peaks and isles pay in ore.</p>
+  <div class="xwrap"><table class="xtable sortable"><thead><tr><th data-k="s">Province</th><th data-k="s">Terrain</th><th data-k="n">Food potential</th><th data-k="n">Gold potential</th><th data-k="s">Land</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 async function main() {
   await loadArtManifest();
   const parts = [overview(), scenariosSec(), howToPlay(), researchSec(), battles(), housesSec(), charactersSec(), provincesSec(),
-    troopsSec(), spiritsSec(), eventsSec(), await gallerySec()];
+    landSec(), troopsSec(), spiritsSec(), eventsSec(), await gallerySec()];
   const article = $('wiki');
   article.innerHTML = parts.join('\n');
   makeSortable(article);
