@@ -118,7 +118,7 @@ function howToPlay() {
   ${sec('orders', 'Orders', 'How to play')}
   <div class="xwrap"><table class="xtable">
   <tr><th>Order</th><th>What it does</th><th>Cost</th></tr>
-  <tr><td><b>Build</b></td><td>Start one building or project on the province's <a href="#land">land</a> (farm, houses, market, mill, granary, temple, walls…, clearing forest, draining marsh), or raise the dikes.</td><td>20–70 gold</td></tr>
+  <tr><td><b>Build</b></td><td><i>Free, and as many as you can pay for:</i> buildings and projects on the province's <a href="#land">land</a>, <b>Repair all</b> damaged buildings (farm, houses, market, mill, granary, temple, walls…, clearing forest, draining marsh), or raise the dikes.</td><td>20–70 gold</td></tr>
   <tr><td><b>Muster</b></td><td>Raise a new troop unit of any type, or reinforce one (max ${MAX_SOLDIERS} soldiers per unit, ${MAX_UNITS_PER_PROVINCE} units per province). New units have no leader.</td><td>troop cost per 10 soldiers; loyalty −2</td></tr>
   <tr><td><b>Train</b></td><td>Drill one unit or the whole garrison: training +10 + leader's Might / 10 (+8 with no leader), up to 100. Training multiplies damage.</td><td>—</td></tr>
   <tr><td><b>Assign leader</b></td><td>Put a vassal at the head of a unit, or take them off it. <i>Free: does not use the month's order.</i></td><td>—</td></tr>
@@ -129,6 +129,7 @@ function howToPlay() {
   <tr><td><b>Govern</b></td><td>Feast: 20 food for loyalty +8. Tax: gold equal to Market, loyalty −10.</td><td>food / loyalty</td></tr>
   <tr><td><b>Diplomacy</b></td><td>Truce, demand tribute, marriage pact, bribe an enemy vassal, or <a href="#wanderers">invite a wanderer</a> standing in or next to the province.</td><td>gold</td></tr>
   <tr><td><b>Study</b></td><td>Scholars add ${studyPoints(0)}–${studyPoints(100)} <a href="#research">research</a> points (best Wits in the province helps) to a branch or your current research.</td><td>—</td></tr>
+  <tr><td><b>Trade grain</b></td><td>Buy or sell food at this month's price in a province with a working Market (300 food a month per Market). Prices follow the seasons (dear before the harvest, cheap right after it) with random swings, scares and gluts; heavy buying raises next month's price, selling lowers it. Buying costs about 12% above the middle price and selling pays 12% below. <i>Free: does not use the month's order.</i></td><td>gold or food</td></tr>
   <tr><td><b>Spy</b></td><td>Reveal a province's stats and garrison.</td><td>—</td></tr>
   <tr><td><b>Recruit</b></td><td>Try to win over a captive vassal.</td><td>—</td></tr>
   <tr><td><b>Rest</b></td><td>Do nothing this month.</td><td>—</td></tr>

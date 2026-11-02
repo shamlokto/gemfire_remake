@@ -100,6 +100,7 @@ export function newGame(player, seed = 1, scenarioId = 'eclipse') {
     pendingEvents: [{ art: STORY.prologue.art, title: STORY.prologue.title, text: STORY.prologue.text }],
     marches: [], autoPlayer: false, defeated: false,
     winner: null, nextUid: 0,
+    market: null,   // the grain market (js/realm/market.js initMarket)
   };
 
   const scale = sc.scale || 1;

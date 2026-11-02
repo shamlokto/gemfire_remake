@@ -29,7 +29,8 @@ import {
 export const UNITLESS_CAPTURE = 0.4;
 import { applyOrder, resetOrders, moveVassal } from './orders.js';
 import { betaTopUp } from './state.js';
-import { monthlyTick } from './economy.js';
+import { monthlyTick, foodUpkeep } from './economy.js';
+import { marketTick, aiTrade, initMarket } from './market.js';
 import { planHouseOrders } from './ai.js';
 import { defect, joinHouse } from './diplomacy.js';
 
@@ -362,6 +363,8 @@ export async function endMonth(state, opts = {}) {
     const orders = withRng(state, rng => planHouseOrders(state, h, rng));
     for (const o of orders) applyOrder(state, o);
     aiExtraBuilds(state, h);
+    initMarket(state);
+    aiTrade(state, h, pr => Math.max(120, foodUpkeep(state, pr) * 6));
   }
 
   // 2. Marches, in rotating house order
@@ -379,6 +382,8 @@ export async function endMonth(state, opts = {}) {
 
   // 3. Economy, research, shard charge, characters
   withRng(state, rng => monthlyTick(state, rng));
+  initMarket(state);
+  withRng(state, rng => marketTick(state, rng));
   researchTick(state);
   chargeTick(state);
   withRng(state, rng => characterTick(state, rng));

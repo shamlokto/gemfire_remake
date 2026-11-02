@@ -37,6 +37,7 @@ import { techEffect, hasTech, studyPoints, addResearch, techState, nextInBranch,
 import { companyDiscount } from './economy.js';
 import { TECH_BY_ID, BRANCHES } from '../data/tech.js';
 import { landOf, yieldOf, applyBuild, cheapestBuild, aiBuild } from './landhooks.js';
+import { trade, tradeCap, tradeRoom } from './market.js';
 import { betaTopUp } from './state.js';
 
 export const DEVELOP_COST = 30;
@@ -48,7 +49,7 @@ export const NEW_UNIT_TRAINING = 20;
 export const ORDER_LABELS = {
   develop: 'Develop', build: 'Build', muster: 'Muster', train: 'Train', hire: 'Hire company', dismiss: 'Dismiss company',
   march: 'March', supply: 'Send supplies', govern: 'Govern', diplomacy: 'Diplomacy', spy: 'Spy',
-  recruit: 'Recruit captive', disband: 'Disband unit', study: 'Study', rest: 'Rest',
+  recruit: 'Recruit captive', disband: 'Disband unit', study: 'Study', trade: 'Trade grain', rest: 'Rest',
 };
 
 const clamp = (x, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
@@ -128,6 +129,8 @@ export function listOrders(state, pid) {
   add('recruit', 0, done || noV || (!captivesOf(state, house).length ? 'No captives.' : null));
   if (pr.units.length) add('disband', 0, done);
   add('study', 0, done);
+  // Trading is a free action, available wherever a Market building works.
+  if (landOf(state, pid)) add('trade', 0, tradeCap(state, pid) ? (tradeRoom(state, pid) ? null : 'The merchants here are done for the month.') : 'Build a Market here to trade.');
   add('rest', 0, done);
   return out;
 }
@@ -222,6 +225,7 @@ export function applyOrder(state, order) {
   // Building on the land is a free action: as many buildings, projects and repairs a month as the
   // province can pay for. It does not use the province's monthly order.
   if (order.type === 'build') { const r = applyBuild(state, pid, order); betaTopUp(state); return r; }
+  if (order.type === 'trade') return trade(state, pid, order.food);
   // Inviting wanderers is free too: invite as many as you can afford (and have room for) each month.
   if (order.type === 'diplomacy' && order.kind === 'wanderer') {
     if (!provinceVassals(state, pid).length) return fail('Needs a vassal in the province.');

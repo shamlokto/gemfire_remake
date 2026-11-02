@@ -23,15 +23,16 @@ import { openLandView } from './landview.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
 import { modal, toast } from './events.js';
+import { quote, tradeRoom, SEASON_FACTOR, TRADE_PER_MARKET, BASE_PRICE } from '../realm/market.js';
 import { sfx } from './audio.js';
 
 const SEASON_BANNER = [4, 5, 6, 7];
-const ORDER_ICON = { build: '⚒', develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', study: '📜', rest: '☾' };
+const ORDER_ICON = { build: '⚒', develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', trade: '⚖', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', study: '📜', rest: '☾' };
 const ORDER_HINT = {
   build: 'Farms, houses, markets…', develop: 'Fields, market or dikes', govern: 'Feast or tax', muster: 'Raise soldiers', train: 'Drill the troops',
   hire: 'Sign a company', dismiss: 'Pay off the company', march: 'Move or attack', supply: 'Send food and gold',
   diplomacy: 'Truce, pact, bribe, wanderers', spy: 'Scout a province', recruit: 'Win over a captive', disband: 'Send a unit home',
-  study: 'Research a tech', rest: 'Do nothing',
+  study: 'Research a tech', trade: 'Buy or sell food', rest: 'Do nothing',
 };
 const militiaOf = pr => Array.isArray(pr.militia) ? pr.militia.reduce((a, n) => a + n, 0) : (pr.militia || 0);
 const soldiersOf = pr => (pr.units || []).reduce((a, u) => a + u.soldiers, 0);
@@ -637,6 +638,54 @@ export class RealmUI {
         foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'), go],
       };
     }, { wide: true }).finally(() => { this.app.map.setHighlights(null); this.app.map.select(this.selected); });
+  }
+
+  // Grain market: buy or sell food at this month's price (free action, needs a Market building).
+  dlg_trade(pid) {
+    const st = this.state, pr = st.provinces[pid];
+    const q = quote(st), room = tradeRoom(st, pid), m = st.market;
+    return modal(close => {
+      const maxSell = Math.min(room, pr.food), maxBuy = Math.min(room, Math.floor(pr.gold / q.buy * 100));
+      const slider = h('input', { type: 'range', min: -Math.floor(maxSell / 10) * 10, max: Math.floor(maxBuy / 10) * 10, step: 10, value: 0 });
+      const out = h('output');
+      const go = h('button.btn.primary', { disabled: true }, 'Trade');
+      const upd = () => {
+        const f = +slider.value;
+        out.textContent = !f ? 'Slide left to sell, right to buy' : f > 0 ? `Buy ${f} food for ${Math.ceil(f * q.buy / 100)} gold`
+          : `Sell ${-f} food for ${Math.floor(-f * q.sell / 100)} gold`;
+        go.disabled = !f;
+      };
+      slider.addEventListener('input', upd); upd();
+      go.onclick = () => close({ type: 'trade', province: pid, food: +slider.value });
+      // Price chart: the last months, with the season under each bar.
+      // Past prices, then the seasonal outlook for the rest of the year (faint bars).
+      const hist = (m?.history || []).slice(-6);
+      const ahead = [];
+      for (let k = 1; hist.length + ahead.length < 12; k++) {
+        const mo = (st.month + k) % 12;
+        ahead.push({ month: mo, price: Math.round(BASE_PRICE * SEASON_FACTOR[mo] * 10) / 10, outlook: true });
+      }
+      const bars = [...hist, ...ahead];
+      const hi = Math.max(...bars.map(x => x.price), q.mid) * 1.1;
+      const chart = h('div.price-chart', ...bars.map((x, i) => h('div.pc-bar' + (i === hist.length - 1 ? '.now' : x.outlook ? '.outlook' : ''),
+        { style: { height: `${Math.round(x.price / hi * 100)}%` }, title: x.outlook ? `${MONTHS[x.month]}: usually about ${x.price}` : `${MONTHS[x.month]}: ${x.price} gold per 100 food` },
+        h('span', MONTHS[x.month].slice(0, 3)))));
+      const season = SEASON_FACTOR[st.month] > 1.15 ? 'Grain is dear: the lean months before the harvest.' :
+        SEASON_FACTOR[st.month] < 0.85 ? 'Grain is cheap: the harvest is in.' : 'Prices are middling.';
+      return {
+        title: `Grain market · ${PROVINCES[pid].name}`,
+        body: [
+          h('div.trade-quote', h('div', h('small', 'Buy'), h('b', `${q.buy}`), h('small', 'gold / 100 food')),
+            h('div', h('small', 'Sell'), h('b', `${q.sell}`), h('small', 'gold / 100 food'))),
+          h('p.hint', `${season} ${q.news ? q.news + ' ' : ''}Prices follow the seasons, with random swings; heavy buying raises next month's price and selling lowers it. Trading does not use the month's order.`),
+          chart,
+          h('p.hint', 'Bright: this month. Faint: the usual price in the months ahead.'),
+          h('p.hint', `This province's markets can handle ${room} more food this month (${TRADE_PER_MARKET} per working Market). Stores: ${fmt(pr.food)} food, ${fmt(pr.gold)} gold.`),
+          h('div.field', h('label', 'Sell ◀ ▶ Buy'), h('div.range-row', slider)), h('p', out),
+        ],
+        foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel'), go],
+      };
+    }, { backdrop: ORDER_BACKDROP.market });
   }
 
   dlg_supply(pid) {
