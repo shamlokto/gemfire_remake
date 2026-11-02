@@ -10,6 +10,10 @@
 //  - march   {from, to, units:[uid] (<=4), vassals:[vid], fifth:'company'|'spirit'|null, food}
 //  - disband {province, unit}
 //  - study   {province, branch?|tech?}             research points into a tech (default: focus)
+//  - build   {province, x, y, kind}                build on the province's land (js/land): a building
+//                                                 key, a project (clear|drain|excavate), 'repair',
+//                                                 'demolish', or kind 'dikes' (no tile). Replaces the
+//                                                 old `develop` order, which remains for saves without land.
 //  - diplomacy kind 'wanderer' {vassal}            invite a wanderer standing in or next to here
 // Leaders of the chosen units always march with them. A march to a foreign province is queued in
 // state.marches (resolved in turn.js at month end); its units and vassals leave the province now.
@@ -32,6 +36,7 @@ import { doDiplomacy, DIPLOMACY } from './diplomacy.js';
 import { techEffect, hasTech, studyPoints, addResearch, techState, nextInBranch, shardStatus } from './tech.js';
 import { companyDiscount } from './economy.js';
 import { TECH_BY_ID, BRANCHES } from '../data/tech.js';
+import { landOf, yieldOf, applyBuild, cheapestBuild, aiBuild } from './landhooks.js';
 
 export const DEVELOP_COST = 30;
 export const SPY_COST = 20;
@@ -40,15 +45,27 @@ export const MAX_MARCH = MAX_UNITS_PER_ARMY;   // troop units per army (plus the
 export const NEW_UNIT_TRAINING = 20;
 
 export const ORDER_LABELS = {
-  develop: 'Develop', muster: 'Muster', train: 'Train', hire: 'Hire company', dismiss: 'Dismiss company',
+  develop: 'Develop', build: 'Build', muster: 'Muster', train: 'Train', hire: 'Hire company', dismiss: 'Dismiss company',
   march: 'March', supply: 'Send supplies', govern: 'Govern', diplomacy: 'Diplomacy', spy: 'Spy',
   recruit: 'Recruit captive', disband: 'Disband unit', study: 'Study', rest: 'Rest',
 };
 
 const clamp = (x, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, x));
 // Muster cost; `state`/`house` optional (Siegecraft makes engines cheaper).
-export const musterCost = (troop, soldiers, state = null, house = null) =>
-  Math.ceil(soldiers / 10) * Math.max(1, Math.round(TROOPS[troop].cost * (troop === 'siege' ? 1 + techEffect(state, house, 'siegeCost') : 1)));
+// `pid` optional: the province's land (pastures make horse and knights cheaper, ore makes engines cheaper).
+export function musterCost(troop, soldiers, state = null, house = null, pid = null) {
+  let per = TROOPS[troop].cost * (troop === 'siege' ? 1 + techEffect(state, house, 'siegeCost') : 1);
+  const y = state && pid != null ? yieldOf(state, pid) : null;
+  if (y && (troop === 'horse' || troop === 'knights')) per *= 1 - y.horseDiscount;
+  if (y && troop === 'siege') per *= 1 - y.siegeDiscount;
+  return Math.ceil(soldiers / 10) * Math.max(1, Math.round(per));
+}
+// Most soldiers one muster order can raise in a province: a third of what its people can field
+// (land muster cap); without land, no limit beyond the unit size.
+export function musterLimit(state, pid) {
+  const y = yieldOf(state, pid);
+  return y ? Math.max(30, Math.floor(y.musterCap / 3 / 10) * 10) : MAX_SOLDIERS;
+}
 export const developGain = gov => Math.round(4 + (gov ? gov.wits / 20 : -2));
 // Drill gain for a unit: its leader's Might helps; leaderless units drill slower. `bonus` from Drill Yards.
 export const trainGain = (leader, bonus = 0) => Math.round((leader ? 10 + leader.might / 10 : 8) + bonus);
@@ -87,7 +104,12 @@ export function listOrders(state, pid) {
   const canRaise = pr.units.length < MAX_UNITS_PER_PROVINCE;
   const canAdd = pr.units.some(u => u.soldiers < MAX_SOLDIERS);
 
-  add('develop', DEVELOP_COST, done || (pr.gold < DEVELOP_COST ? `Needs ${DEVELOP_COST} gold.` : null));
+  if (landOf(state, pid)) {
+    const c = cheapestBuild(state, pid);
+    add('build', c, done || (pr.gold < Math.min(c, 30) ? `Needs ${Math.min(c, 30)} gold.` : null));
+  } else {
+    add('develop', DEVELOP_COST, done || (pr.gold < DEVELOP_COST ? `Needs ${DEVELOP_COST} gold.` : null));
+  }
   add('govern', FEAST_FOOD, done);
   add('muster', cheapestTroop, done || (!canRaise && !canAdd ? 'No room for more soldiers.' : pr.gold < cheapestTroop ? 'No gold.' : null));
   add('train', 0, done || (!pr.units.length ? 'No units to drill.' : null));
@@ -148,11 +170,11 @@ export function marchOptions(state, pid) {
 export function musterOptions(state, pid) {
   const pr = state.provinces[pid];
   return {
-    types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: musterCost(t, 10, state, pr.owner) })),
+    types: TROOP_TYPES.map(t => ({ type: t, name: TROOPS[t].name, costPer10: musterCost(t, 10, state, pr.owner, pid) })),
     units: pr.units.filter(u => u.soldiers < MAX_SOLDIERS)
       .map(u => ({ uid: u.uid, type: u.type, name: unitName(u), soldiers: u.soldiers, room: MAX_SOLDIERS - u.soldiers })),
     canRaise: pr.units.length < MAX_UNITS_PER_PROVINCE,
-    maxSoldiers: MAX_SOLDIERS, gold: pr.gold,
+    maxSoldiers: MAX_SOLDIERS, gold: pr.gold, limit: musterLimit(state, pid),
   };
 }
 
@@ -205,9 +227,19 @@ export function applyOrder(state, order) {
 const HANDLERS = {
   rest: () => ({ ok: true, msg: 'The province rests.' }),
 
+  build(state, pr, house, o) {
+    return applyBuild(state, pr.id, o);
+  },
+
   develop(state, pr, house, o) {
     const kind = o.kind;
     if (!['fields', 'market', 'dikes'].includes(kind)) return fail('Develop fields, market or dikes.');
+    if (landOf(state, pr.id)) {
+      // Old-style order on a land map: build the best farm (fields) or trade building (market).
+      if (kind === 'dikes') return applyBuild(state, pr.id, { kind: 'dikes' });
+      const b = aiBuild(state, pr.id, kind === 'fields' ? 'food' : 'gold');
+      return b ? applyBuild(state, pr.id, b) : fail('Nothing worth building that you can afford.');
+    }
     if (pr[kind] >= 100) return fail(`The ${kind} are fully developed.`);
     if (pr.gold < DEVELOP_COST) return fail(`Needs ${DEVELOP_COST} gold.`);
     pr.gold -= DEVELOP_COST;
@@ -240,12 +272,12 @@ const HANDLERS = {
     if (!TROOPS[type]) return fail('Choose a troop type.');
     if (!u && pr.units.length >= MAX_UNITS_PER_PROVINCE) return fail(`At most ${MAX_UNITS_PER_PROVINCE} units in a province.`);
     const have = u ? u.soldiers : 0;
-    let n = Math.floor(Math.min(o.soldiers | 0, MAX_SOLDIERS - have) / 10) * 10;
-    const per10 = musterCost(type, 10, state, house);
+    let n = Math.floor(Math.min(o.soldiers | 0, MAX_SOLDIERS - have, musterLimit(state, pr.id)) / 10) * 10;
+    const per10 = musterCost(type, 10, state, house, pr.id);
     const affordable = Math.floor(pr.gold / per10) * 10;
     n = Math.min(n, affordable);
     if (n <= 0) return fail(have >= MAX_SOLDIERS ? 'This unit is at full strength.' : 'Not enough gold.');
-    const cost = musterCost(type, n, state, house);
+    const cost = musterCost(type, n, state, house, pr.id);
     pr.gold -= cost;
     if (u) {
       u.training = Math.round((u.training * u.soldiers + NEW_UNIT_TRAINING * n) / (u.soldiers + n));

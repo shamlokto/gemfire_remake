@@ -23,6 +23,7 @@
 // March = { house, from, to, units: [Unit], vassals: [vassalId],
 //           fifth: null | { kind: 'company', type, soldiers } | { kind: 'spirit', id }, food }
 
+import { initLand, yieldOf } from './landhooks.js';
 import {
   PROVINCES, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, START_YEAR, seasonOf, ADJACENCY, VICTORY_PROVINCES as VP,
 } from '../data/world.js';
@@ -144,9 +145,13 @@ export function newGame(player, seed = 1, scenarioId = 'eclipse') {
     state.log.push({ turn: 0, text: `Scenario: ${sc.name}, year ${state.year}.`, kind: 'story' });
     state.pendingEvents.push({ art: sc.art, title: sc.name, text: sc.blurb });
   }
+  // Province land grids, developed to each province's starting fields/market (bigger realms
+  // in later scenarios start more developed).
+  initLand(state, sc.landDevelop ?? LAND_DEVELOP[sc.id] ?? 1);
   state.rng = rng.state;
   return state;
 }
+const LAND_DEVELOP = { eclipse: 1, raven: 1.2, crowns: 1.25, lastshard: 1.7 };
 
 // Wanderers in (or invitable from) a province: those standing in it or in a neighbour.
 export function wanderersAt(state, pid) {
@@ -273,7 +278,9 @@ export function provinceDefence(state, pid) {
   let s = provinceArmyPower(state, pid);
   if (!pr.owner) s += pr.militia.reduce((a, n) => a + unitPower('militia', n, 30, 0), 0);
   else if (s === 0) s += unitPower('militia', emptyMilitia(pr), 25, 0);
-  return s * (pr.owner ? 1.25 : 1);   // keep walls
+  // keep walls; the land's keep and walls (js/land) add on top of the base 10%
+  const land = pr.owner ? (yieldOf(state, pid)?.defense || 0.1) : 0;
+  return s * (pr.owner ? 1.25 * (1 + land - 0.1) : 1);
 }
 // An owned province with no troops raises a levy from its people.
 export function emptyMilitia(pr) { return Math.round(20 + pr.loyalty); }

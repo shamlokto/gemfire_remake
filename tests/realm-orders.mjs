@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test, done } from './_harness.mjs';
 import { newGame } from '../js/realm/state.js';
+import { provinceYield, monthTick, T } from '../js/land/land.js';
+import { makeRng } from '../js/rng.js';
 import { listOrders, applyOrder, assignLeader, marchOptions, musterOptions, DEVELOP_COST } from '../js/realm/orders.js';
 
 const uidsOf = (s, pid) => s.provinces[pid].units.map(u => u.uid);
@@ -9,7 +11,7 @@ const ledBy = (s, pid, vid) => s.provinces[pid].units.find(u => u.leader === vid
 test('listOrders for an owned province', () => {
   const s = newGame('aldmere', 1);
   const l = listOrders(s, 8);
-  assert.ok(l.find(o => o.type === 'develop' && !o.disabled));
+  assert.ok(l.find(o => o.type === 'build' && !o.disabled), 'land games build instead of develop');
   assert.ok(l.find(o => o.type === 'march' && !o.disabled));
   assert.ok(l.find(o => o.type === 'muster' && !o.disabled));
   assert.deepEqual(listOrders(s, 13), []);
@@ -36,14 +38,25 @@ test('assignLeader validation', () => {
   assert.equal(u.leader, null);
 });
 
-test('develop spends gold and raises the stat', () => {
+test('build: a farm on the land costs gold, takes months, then raises the harvest', () => {
   const s = newGame('aldmere', 1);
-  const pr = s.provinces[8];
-  const g = pr.gold, f = pr.fields;
-  assert.ok(applyOrder(s, { province: 8, type: 'develop', kind: 'fields' }).ok);
-  assert.equal(pr.gold, g - DEVELOP_COST);
-  assert.ok(pr.fields > f);
-  assert.equal(applyOrder(s, { province: 9, type: 'develop', kind: 'nope' }).ok, false);
+  const pr = s.provinces[8], land = s.land[8];
+  pr.gold = 500;
+  const i = land.t.findIndex((t, k) => (t === T.FERTILE || t === T.PLAIN) && !land.b[k]);
+  assert.ok(i >= 0);
+  const x = i % land.w, y = (i / land.w) | 0;
+  const before = provinceYield(land).food, g = pr.gold;
+  const r = applyOrder(s, { province: 8, type: 'build', x, y, kind: 'farm' });
+  assert.ok(r.ok, r.msg);
+  assert.equal(pr.gold, g - r.cost);
+  assert.ok(land.c[i] > 0, 'under construction');
+  assert.equal(applyOrder(s, { province: 8, type: 'build', x, y, kind: 'farm' }).ok, false, 'one order a month');
+  for (let k = 0; k < 4; k++) monthTick(land, makeRng(k));
+  assert.ok(provinceYield(land).food > before, 'the new farm feeds people');
+  assert.equal(applyOrder(s, { province: 9, type: 'build', x: 0, y: 0, kind: 'nope' }).ok, false);
+  // old-style develop maps onto the land
+  s.provinces[9].gold = 500;
+  assert.ok(applyOrder(s, { province: 9, type: 'develop', kind: 'fields' }).ok);
 });
 
 test('muster tops up a unit or raises a new one, within caps', () => {

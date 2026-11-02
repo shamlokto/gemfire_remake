@@ -12,6 +12,7 @@
 // buildBattleInput. Defenders beyond the 4 fielded units fall back with the vassals if the
 // province falls.
 
+import { yieldOf, warDamage, applyLoot, landQuality } from './landhooks.js';
 import { STORY } from '../data/events.js';
 import { HOUSES } from '../data/houses.js';
 import { SPIRIT_IDS, SPIRIT_UNIT } from '../data/spirits.js';
@@ -69,7 +70,9 @@ export function buildBattleInput(state, march) {
   const terrain = PROVINCES[pr.id].terrain;
   const aH = march.house, dH = pr.owner;
   const atkMods = { house: aH, atk: (1 + techEffect(state, aH, 'troopAtk')) * (isSeaLane(march.from, march.to) ? 1 + techEffect(state, aH, 'seaAttack') : 1), def: 1 };
-  const defMods = { house: dH, atk: 1 + techEffect(state, dH, 'troopAtk'), def: 1 + techEffect(state, dH, 'homeDef') };
+  // Defenders of an owned province gain its land's keep and walls (yield.defense, js/land).
+  const landDef = pr.owner ? (yieldOf(state, pr.id)?.defense || 0) : 0;
+  const defMods = { house: dH, atk: 1 + techEffect(state, dH, 'troopAtk'), def: (1 + techEffect(state, dH, 'homeDef')) * (1 + landDef) };
   const atkVassals = march.vassals.map(id => state.vassals[id]).filter(v => v && v.status === 'active');
   const atk = march.units.filter(u => u.soldiers > 0).map(u => troopIn(state, u, atkMods));
   if (march.fifth?.kind === 'company' && march.fifth.soldiers > 0) atk.push(companyIn(march.fifth, 'company:a', terrain));
@@ -244,6 +247,22 @@ export function applyBattleResult(state, march, input, result) {
         if (defHouse && state.houses[defHouse]?.charge) delete state.houses[defHouse].charge[pr.shard];
       }
       offerWanderers(state, rng, pr.id, atkHouse);
+      // War scars the land: damage by how bloody the fight was (sieges worse). Then the
+      // conqueror may sack it (the player chooses; AI houses decide here).
+      const total = [...input.attacker.units, ...input.defender.units].reduce((a, u) => a + u.soldiers, 0);
+      const remain = [...result.attacker.units, ...result.defender.units].reduce((a, u) => a + Math.max(0, u.soldiers), 0);
+      const intensity = total ? Math.min(1, (total - remain) / total * (input.siege ? 1.4 : 1) + (input.siege ? 0.1 : 0)) : 0;
+      const dmg = warDamage(state, pr.id, intensity, rng);
+      if (dmg && (dmg.damaged || dmg.razed)) addLog(state, `${where} is scarred by the fighting: ${dmg.damaged} buildings damaged, ${dmg.razed} razed.`, 'battle');
+      if (state.land) {
+        if (isPlayerControlled(state, atkHouse)) {
+          state.pendingEvents.push({ kind: 'loot', province: pr.id, art: STORY.siege.art, title: `${where} is yours`,
+            text: `Your soldiers hold ${where}${landQuality(state, pr.id) ? ` (${landQuality(state, pr.id)} land)` : ''}. Sack it for gold now, or spare it and keep its people loyal?\nLooting fills your coffers but damages markets, houses and granaries, and loyalty falls by 25.` });
+        } else if (aiWantsLoot(state, atkHouse, pr.id, rng)) {
+          const r = applyLoot(state, pr.id, rng);
+          addLog(state, `${houseName(atkHouse)} sacks ${where} for ${r.gold} gold.`, 'battle');
+        }
+      }
       if (defHouse) {
         loyaltyShock(state, rng, defHouse, atkHouse);
         if (!ownedProvinces(state, defHouse).length) eliminate(state, defHouse, atkHouse);
@@ -267,6 +286,19 @@ export function applyBattleResult(state, march, input, result) {
       if (defHouse) loyaltyShock(state, rng, atkHouse, defHouse);
     }
   });
+}
+
+// AI: sack a conquered province? Not if it holds shards (loyalty drives their charge) or the land
+// is worth keeping whole; more likely for raiders and empty treasuries.
+const RAIDERS = { corvane: 0.25, hrothgar: 0.2, vey: 0.1 };
+function aiWantsLoot(state, house, pid, rng) {
+  const holdsShard = state.provinces.some(p => p.owner === house && p.shard);
+  const q = landQuality(state, pid);
+  const gold = ownedProvinces(state, house).reduce((a, p) => a + p.gold, 0);
+  let p = (RAIDERS[house] || 0.05) + (gold < 150 ? 0.25 : 0);
+  if (holdsShard) p *= 0.4;
+  if (q === 'breadbasket' || q === 'fertile') p *= 0.3;
+  return rng.chance(p);
 }
 
 // Wanderers in a conquered province may offer their swords to the conqueror.

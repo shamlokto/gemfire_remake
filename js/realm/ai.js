@@ -5,8 +5,9 @@
 // company, move interior troops toward the frontier (chokepoints first), diplomacy from the
 // capital, drill, feast, develop. Reads state only; orders are applied by turn.js in sequence.
 
+import { landOf, aiBuild, landPotential } from './landhooks.js';
 import { TROOPS, COMPANIES, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE } from '../data/units.js';
-import { ADJACENCY, isSeaLane } from '../data/world.js';
+import { ADJACENCY, PROVINCES, isSeaLane } from '../data/world.js';
 import {
   ownedProvinces, provinceVassals, provinceDefence, unitPower, atPeace, troopPower, companyPower,
   spiritPower, housePower, captivesOf, isRuler, provinceUpkeep, envoyOf, availableSpirit,
@@ -177,7 +178,7 @@ function planProvince(state, house, pr, rng, ctx) {
 
   // --- Develop ---
   if (pr.gold >= DEVELOP_COST + RESERVE_GOLD / 2) {
-    const d = develop(pr, foodTight, state);
+    const d = develop(pr, foodTight, state, threatened);
     if (d) return d;
   }
   // --- Study: scholars at the capital, or wherever there is nothing better to do ---
@@ -230,7 +231,20 @@ function planMuster(state, pr, units, threatened, foodTight, ctx) {
   return null;
 }
 
-function develop(pr, foodTight, state) {
+// Land builds by house temperament (js/land suggestBuild goals).
+const BUILD_GOAL = { aldmere: 'food', isolde: 'gold', corvane: 'gold', hrothgar: 'balanced', seraphine: 'loyalty', vey: 'food' };
+function develop(pr, foodTight, state, threatened = false) {
+  if (landOf(state, pr.id)) {
+    if (pr.dikes < 40 && state.month >= 8 && pr.fields > 30 && PROVINCES[pr.id].terrain !== 'mountain') return { province: pr.id, type: 'build', kind: 'dikes' };
+    const holdsShard = state.provinces.some(p => p.owner === pr.owner && p.shard);
+    let goal = BUILD_GOAL[pr.owner] || 'balanced';
+    if (goal === 'loyalty' && pr.loyalty >= 70) goal = 'balanced';
+    if (foodTight) goal = 'food';
+    else if (threatened) goal = 'army';
+    else if (pr.loyalty < (holdsShard ? 60 : 45)) goal = 'loyalty';
+    else if (goal !== 'food' && (state.turn + pr.id) % 3 === 0) goal = 'food';   // everyone needs bread
+    return aiBuild(state, pr.id, goal, RESERVE_GOLD / 2);
+  }
   let kind;
   if (pr.dikes < 40 && state.month >= 8 && pr.fields > 30) kind = 'dikes';
   else if (foodTight || pr.fields < pr.market) kind = pr.fields < 100 ? 'fields' : 'market';
@@ -273,7 +287,9 @@ function chooseAttack(state, house, pr, vs, units, ctx, rng) {
     if (vsLeader) score += 0.5;
     if (t.owner && state.houses[t.owner].capital === n) score += 0.3;
     if (ADJACENCY[n].length === 1) score += 0.2;   // dead ends are safe to hold
-    score += t.fields / 200 + t.market / 200;
+    // Good land is worth a war: rate the province by its land's potential (breadbaskets!).
+    const lp = landPotential(state, n);
+    score += lp ? lp.food / 1400 + lp.gold / 160 : t.fields / 200 + t.market / 200;
     if (!best || score > best.score) best = { score, n, group };
   }
   if (!best) return null;

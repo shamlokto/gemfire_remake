@@ -16,7 +16,7 @@ import {
   studyPoints, hasTech, nextInBranch, CHARGE_MAX, CHARGE_LOYALTY_FLOOR, techEffect,
 } from '../realm/tech.js';
 import { TECHS, TECH_BY_ID, BRANCHES, BRANCH_IDS, techsOf } from '../data/tech.js';
-import { listOrders, musterCost, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions, hireOptions } from '../realm/orders.js';
+import { listOrders, musterCost, musterLimit, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions, hireOptions } from '../realm/orders.js';
 import { forecast } from '../realm/economy.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
@@ -313,13 +313,13 @@ export class RealmUI {
       const sync = () => {
         box.querySelectorAll('.target').forEach(b => b.classList.toggle('on', b.dataset.k === (target.kind === 'new' ? 'new:' + target.type : 'add:' + target.uid)));
         const t = typeOf();
-        const max = Math.max(10, Math.min(room(), Math.floor(pr.gold / musterCost(t, 10, st, pr.owner)) * 10));
+        const max = Math.max(10, Math.min(room(), musterLimit(st, pid), Math.floor(pr.gold / musterCost(t, 10, st, pr.owner, pid)) * 10));
         range.max = max;
         if (+range.value > max) range.value = max;
         out.textContent = range.value;
         const have = target.kind === 'new' ? 0 : pr.units.find(u => u.uid === target.uid).soldiers;
-        cost.textContent = `${musterCost(t, +range.value, st, pr.owner)} gold of ${pr.gold} · ${target.kind === 'new' ? 'new unit of ' : `${have} → ${have + +range.value} `}${TROOPS[t].name.toLowerCase()}`;
-        go.disabled = musterCost(t, +range.value, st, pr.owner) > pr.gold;
+        cost.textContent = `${musterCost(t, +range.value, st, pr.owner, pid)} gold of ${pr.gold} · ${target.kind === 'new' ? 'new unit of ' : `${have} → ${have + +range.value} `}${TROOPS[t].name.toLowerCase()}`;
+        go.disabled = musterCost(t, +range.value, st, pr.owner, pid) > pr.gold;
       };
       range.addEventListener('input', sync);
       const box = h('div');
