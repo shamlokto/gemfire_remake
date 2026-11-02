@@ -183,3 +183,20 @@ Victory: `VICTORY_PROVINCES` = 20 provinces, or all 5 shards. Each province has 
 * Free holds defend with 1-3 leaderless militia units.
 * After the battle, losers' vassals with no surviving unit can be captured even if a retreat
   exists (40% each), so leaders matter.
+
+## v3: tech tree, shard charge, scenarios, wanderers and heirs
+* **Research** (`js/data/tech.js`, `js/realm/tech.js`): 19 techs in Agriculture, Commerce,
+  Military and Arcana. `houses[id].tech = { researched, progress, focus }`. Points: markets
+  (1 per 30 Market a month) plus the `study` order (6 + best Wits / 8). Cost = TECH_COST[tier] ×
+  (1 + 0.15 × techs known). Effects are read with `techEffect(state, house, key)`; battle effects
+  reach units as optional `atkBonus` / `defBonus` multipliers in UnitIn (honoured by rules.js).
+* **Shard charge** replaces "one summon per season": `houses[id].charge[spirit]` 0-100. A summon
+  needs 100 and spends it (win or lose; Lantern Lore leaves 20). Monthly gain per shard =
+  (average loyalty of all the house's provinces − 35) × 0.5, +50% with Shard Attunement. A captured
+  shard starts at 0. `availableSpirit` and `marchOptions().spirits` reflect it.
+* **Scenarios** (`js/data/scenarios.js`): `newGame(house, seed, scenarioId)`; state.scenario,
+  state.startYear. Title → scenario → house.
+* **Wanderers / heirs** (`js/data/vassals.js` WANDERERS, HEIRS): state vassals with status
+  `wandering` (house null, location) or `future` (dueTurn). Diplomacy kind `wanderer` invites one
+  in or next to the province; conquest may recruit those in the province; heirs join at the capital.
+* **Companies**: 8 more (`requires`, `monster`, `terrainBonus`, `loyaltyHit`, wage 0 traits).

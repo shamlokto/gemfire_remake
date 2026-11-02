@@ -9,22 +9,27 @@ import { SPIRITS, SPIRIT_UNIT } from '../data/spirits.js';
 import { art, PROVINCE_VIGNETTE, ORDER_BACKDROP } from '../data/art.js';
 import {
   provinceVassals, governorOf, houseTotals, canSee, captivesOf, atPeace, pairKey, provinceDefence,
-  ownedProvinces, envoyOf, troopPower, companyPower, spiritPower, leaderOf, unitName,
+  ownedProvinces, envoyOf, troopPower, companyPower, spiritPower, leaderOf, unitName, wanderersAt, wanderersNear,
 } from '../realm/state.js';
-import { listOrders, musterCost, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions } from '../realm/orders.js';
+import {
+  shardStatus, chargeGain, averageLoyalty, techState, canResearch, techCost, setResearch, researchPoints,
+  studyPoints, hasTech, nextInBranch, CHARGE_MAX, CHARGE_LOYALTY_FLOOR, techEffect,
+} from '../realm/tech.js';
+import { TECHS, TECH_BY_ID, BRANCHES, BRANCH_IDS, techsOf } from '../data/tech.js';
+import { listOrders, musterCost, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions, hireOptions } from '../realm/orders.js';
 import { forecast } from '../realm/economy.js';
-import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance } from '../realm/diplomacy.js';
+import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
 import { modal, toast } from './events.js';
 import { sfx } from './audio.js';
 
 const SEASON_BANNER = [4, 5, 6, 7];
-const ORDER_ICON = { develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', rest: '☾' };
+const ORDER_ICON = { develop: '⚒', govern: '⚖', muster: '⚔', train: '🛡', hire: '💰', dismiss: '✕', march: '🚩', supply: '🛒', diplomacy: '🕊', spy: '👁', recruit: '⛓', disband: '⚐', study: '📜', rest: '☾' };
 const ORDER_HINT = {
   develop: 'Fields, market or dikes', govern: 'Feast or tax', muster: 'Raise soldiers', train: 'Drill the troops',
   hire: 'Sign a company', dismiss: 'Pay off the company', march: 'Move or attack', supply: 'Send food and gold',
-  diplomacy: 'Truce, pact, bribe', spy: 'Scout a province', recruit: 'Win over a captive', disband: 'Send a unit home',
-  rest: 'Do nothing',
+  diplomacy: 'Truce, pact, bribe, wanderers', spy: 'Scout a province', recruit: 'Win over a captive', disband: 'Send a unit home',
+  study: 'Research a tech', rest: 'Do nothing',
 };
 const militiaOf = pr => Array.isArray(pr.militia) ? pr.militia.reduce((a, n) => a + n, 0) : (pr.militia || 0);
 const soldiersOf = pr => (pr.units || []).reduce((a, u) => a + u.soldiers, 0);
@@ -83,6 +88,7 @@ export class RealmUI {
     this.body.innerHTML = '';
     if (this.tab === 'province') this.body.append(this.selected == null ? this.overview() : this.provincePanel(this.selected));
     else if (this.tab === 'houses') this.body.append(this.housesPanel());
+    else if (this.tab === 'research') this.body.append(this.researchPanel());
     else this.body.append(this.chronicle());
     this.body.scrollTop = keep;
     this.renderLegend();
@@ -103,7 +109,7 @@ export class RealmUI {
         h('span', { title: 'Gold (all provinces)' }, h('i', '🪙'), fmt(t.gold)),
         h('span', { title: 'Food (all provinces)' }, h('i', '🌾'), fmt(t.food)),
         h('span', { title: 'Soldiers' }, h('i', '⚔'), fmt(t.soldiers)),
-        h('span', { title: 'Lantern Shards' }, h('i', '◆'), t.shards.length)),
+        shardStatus(st, st.player).length ? shardStatus(st, st.player).map(x => chargeMeter(x, true)) : h('span', { title: 'Lantern Shards' }, h('i', '◆'), 0)),
       h('div.top-actions',
         h('button.icon-btn', { title: 'Settings', onclick: () => this.app.openSettings() }, '⚙'),
         h('button.icon-btn', { title: 'Menu', onclick: () => this.app.openMenu() }, '☰'),
@@ -114,7 +120,7 @@ export class RealmUI {
 
   renderTabs() {
     this.tabs.innerHTML = '';
-    for (const [id, label] of [['province', 'Province'], ['houses', 'Houses'], ['log', 'Chronicle']]) {
+    for (const [id, label] of [['province', 'Province'], ['houses', 'Houses'], ['research', 'Research'], ['log', 'Chronicle']]) {
       this.tabs.append(h('button' + (this.tab === id ? '.on' : ''), { onclick: () => { sfx('click'); this.tab = id; this.side.classList.remove('collapsed'); this.render(); } }, label));
     }
   }
@@ -195,6 +201,15 @@ export class RealmUI {
     frag.append(h('div.section-title', `Vassals ${vs.length}/${MAX_VASSALS_PER_PROVINCE}`));
     if (!vs.length) frag.append(h('p.hint', pr.owner ? 'No vassal is stationed here. Units can hold the province, but only a vassal can lead an attack.' : 'No lord rules this free hold.'));
     for (const v of vs) frag.append(vassalRow(st, v, pr.units.find(u => u.leader === v.id)));
+    const wand = wanderersAt(st, pid);
+    if (wand.length) {
+      frag.append(h('div.section-title', `Wanderers ${wand.length}`));
+      frag.append(h('p.hint', 'Free swords with no house. Invite them by Diplomacy from this province or a neighbour; some offer their service to whoever takes the province they are in.'));
+      for (const w of wand) frag.append(h('div.vassal', portrait(w.id, { size: 44 }),
+        h('div', h('div.nm', VASSAL_BY_ID[w.id].name, h('span.wanderer-tag', 'wanderer')), h('div.ti', VASSAL_BY_ID[w.id].title),
+          h('div.mini', h('span', 'Might ', h('b', w.might)), h('span', 'Wits ', h('b', w.wits)), h('span', 'Charm ', h('b', w.charm)),
+            w.band ? h('span', `${w.band} ${TROOPS[w.troop]?.name.toLowerCase() || ''}`) : null))));
+    }
     const marching = (st.marches || []).filter(m => m.from === pid && m.house === st.player);
     for (const m of marching) frag.append(h('div.ordered-note', { style: { marginTop: '6px' } },
       `🚩 ${m.units.length} unit(s)${m.vassals.length ? `, ${m.vassals.length} vassal(s)` : ''}${m.fifth ? ` and the ${m.fifth.kind === 'spirit' ? SPIRITS[m.fifth.id].name : COMPANIES[m.fifth.type]?.name || 'company'}` : ''} marching on ${PROVINCES[m.to].name}.`));
@@ -298,13 +313,13 @@ export class RealmUI {
       const sync = () => {
         box.querySelectorAll('.target').forEach(b => b.classList.toggle('on', b.dataset.k === (target.kind === 'new' ? 'new:' + target.type : 'add:' + target.uid)));
         const t = typeOf();
-        const max = Math.max(10, Math.min(room(), Math.floor(pr.gold / TROOPS[t].cost) * 10));
+        const max = Math.max(10, Math.min(room(), Math.floor(pr.gold / musterCost(t, 10, st, pr.owner)) * 10));
         range.max = max;
         if (+range.value > max) range.value = max;
         out.textContent = range.value;
         const have = target.kind === 'new' ? 0 : pr.units.find(u => u.uid === target.uid).soldiers;
-        cost.textContent = `${musterCost(t, +range.value)} gold of ${pr.gold} · ${target.kind === 'new' ? 'new unit of ' : `${have} → ${have + +range.value} `}${TROOPS[t].name.toLowerCase()}`;
-        go.disabled = musterCost(t, +range.value) > pr.gold;
+        cost.textContent = `${musterCost(t, +range.value, st, pr.owner)} gold of ${pr.gold} · ${target.kind === 'new' ? 'new unit of ' : `${have} → ${have + +range.value} `}${TROOPS[t].name.toLowerCase()}`;
+        go.disabled = musterCost(t, +range.value, st, pr.owner) > pr.gold;
       };
       range.addEventListener('input', sync);
       const box = h('div');
@@ -344,7 +359,7 @@ export class RealmUI {
             const l = leaderOf(st, u);
             return h('button.target', { style: { display: 'grid', gridTemplateColumns: '44px 1fr', gap: '10px', alignItems: 'center' }, onclick: () => close({ type: 'train', province: pid, unit: u.uid }) },
               l ? portrait(l.id, { size: 40 }) : h('img', { src: art(TROOPS[u.type]?.sprite || 63), style: { width: '40px', height: '40px', objectFit: 'contain' } }),
-              h('div', h('div.nm', `${unitName(u)} (${u.soldiers})`), h('div.meta', `Training ${u.training} → ${Math.min(100, u.training + trainGain(l))}` + (l ? ` · led by ${VASSAL_BY_ID[l.id].name}` : ' · no leader'))));
+              h('div', h('div.nm', `${unitName(u)} (${u.soldiers})`), h('div.meta', `Training ${u.training} → ${Math.min(100, u.training + trainGain(l, techEffect(st, pr.owner, 'trainGain')))}` + (l ? ` · led by ${VASSAL_BY_ID[l.id].name}` : ' · no leader'))));
           }))],
       foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel')],
     }), { backdrop: ORDER_BACKDROP.train });
@@ -365,10 +380,14 @@ export class RealmUI {
     const st = this.state, pr = st.provinces[pid];
     return modal(close => ({
       title: 'Hire a company',
-      body: h('div.target-grid', ...Object.entries(COMPANIES).map(([k, c]) =>
-        h('button.target', { disabled: pr.gold < c.hire, onclick: () => close({ type: 'hire', province: pid, company: k }) },
-          h('img', { src: art(c.sprite), style: { width: '100%', height: '70px', objectFit: 'contain' } }),
-          h('div.nm', c.name), h('div.meta', `${c.size} strong · atk ${c.atk} def ${c.def}`), h('div.meta', `${c.hire}g, then ${c.wage}g/month`)))),
+      body: h('div.target-grid', ...hireOptions(st, pid).map(o => {
+        const c = COMPANIES[o.type];
+        return h('button.target', { disabled: !!o.disabled, title: o.disabled || c.note || '', onclick: () => close({ type: 'hire', province: pid, company: o.type }) },
+          h('img', { src: art(c.sprite), style: { width: '100%', height: '70px', objectFit: 'contain', filter: o.locked ? 'grayscale(1)' : '' } }),
+          h('div.nm', c.name, c.flying ? ' 🪽' : ''), h('div.meta', `${c.size} strong · atk ${c.atk} def ${c.def}${c.range > 1 ? ' · range ' + c.range : ''}`),
+          h('div.meta', o.locked ? '🔒 ' + o.disabled : `${o.cost}g, then ${o.wage ? o.wage + 'g/month' : 'no wages'}`),
+          c.note ? h('div.meta', { style: { fontStyle: 'italic' } }, c.note) : null);
+      })),
       foot: [h('span.hint', { style: { marginRight: 'auto' } }, `Treasury: ${pr.gold} gold`), h('button.btn', { onclick: () => close(null) }, 'Cancel')],
     }), { wide: true, backdrop: ORDER_BACKDROP.hire });
   }
@@ -442,13 +461,23 @@ export class RealmUI {
         if (comp) opt('company', COMPANIES[comp.type].name, `Hired company · ${comp.soldiers}`, h('img', { src: art(COMPANIES[comp.type].sprite), style: { width: '100%', height: '54px', objectFit: 'contain' } }));
         else opt('company', 'Company', '', null, 'No company is hired here.');
         const sp = mo.fifth.find(f => f.kind === 'spirit');
-        const shards = houseTotals(st, st.player).shards;
+        const spirits = mo.spirits || [];
         if (sp) {
           const S = SPIRITS[sp.id], U = SPIRIT_UNIT[sp.id];
-          opt('spirit', S.name, `Summon · atk ${U.atk} def ${U.def} · ${S.spell}`,
+          const b = h('button.target' + (fifth === 'spirit' ? '.on' : ''), { disabled: !anyVassal, title: anyVassal ? '' : 'A vassal must march to summon it.', onclick: () => { fifth = 'spirit'; sync(); } },
             h('img', { src: art(S.art), style: { width: '100%', height: '54px', objectFit: 'cover', borderRadius: '4px', boxShadow: `0 0 10px ${S.color}` } }),
-            anyVassal ? null : 'A vassal must march to summon it.');
-        } else opt('spirit', 'Spirit', '', null, shards.length ? 'Your spirits have been called this season.' : 'You hold no Lantern Shard.');
+            h('div.nm', S.name), h('div.meta', anyVassal ? `Summon · atk ${U.atk} def ${U.def} · ${S.spell}` : 'A vassal must march to summon it.'),
+            chargeMeter(spirits.find(x => x.id === sp.id) || { id: sp.id, charge: CHARGE_MAX, gain: chargeGain(st, st.player), ready: true }),
+            h('div.meta', 'Spends the whole charge, win or lose.'));
+          fifthBox.append(b);
+        }
+        for (const x of spirits.filter(x => !sp || x.id !== sp.id)) {
+          const S = SPIRITS[x.id];
+          fifthBox.append(h('button.target', { disabled: true, title: x.reason || '' },
+            h('img', { src: art(S.art), style: { width: '100%', height: '54px', objectFit: 'cover', borderRadius: '4px', filter: 'saturate(.4) brightness(.7)' } }),
+            h('div.nm', S.name), chargeMeter(x), h('div.meta', x.reason || '')));
+        }
+        if (!sp && !spirits.length) opt('spirit', 'Spirit', '', null, 'You hold no Lantern Shard.');
         if (fifth === 'spirit' && (!sp || !anyVassal)) fifth = null;
         if (fifth === 'company' && !comp) fifth = null;
       };
@@ -569,7 +598,15 @@ export class RealmUI {
         kinds.querySelectorAll('.target').forEach(b => b.classList.toggle('on', b.dataset.k === kind));
         targetsBox.innerHTML = '';
         info.innerHTML = '';
-        if (kind === 'bribe') {
+        if (kind === 'wanderer') {
+          const cands = wanderersNear(st, pid);
+          if (!cands.some(v => v.id === vassal)) vassal = cands[0]?.id ?? null;
+          targetsBox.append(h('div.pick-list', ...cands.map(v => h('button.target' + (v.id === vassal ? '.on' : ''), { style: { display: 'grid', gridTemplateColumns: '44px 1fr', gap: '10px', alignItems: 'center' }, onclick: () => { vassal = v.id; sync(); } },
+            portrait(v.id, { size: 40 }), h('div', h('div.nm', VASSAL_BY_ID[v.id].name), h('div.meta', `${VASSAL_BY_ID[v.id].title} · in ${PROVINCES[v.location].name} · Might ${v.might} Wits ${v.wits} Charm ${v.charm}${v.band ? ` · brings ${v.band} ${TROOPS[v.troop]?.name.toLowerCase() || ''}` : ''}`))))));
+          if (!cands.length) targetsBox.append(h('p.hint', 'No wanderer is in or next to this province.'));
+          if (vassal) info.append(h('p.hint', `Chance ${pct(wandererChance(st, st.player, envoy, st.vassals[vassal]))}. Costs ${DIPLOMACY.wanderer.cost} gold in gifts. Each refusal makes the next offer likelier.`));
+          send.disabled = !vassal;
+        } else if (kind === 'bribe') {
           const cands = Object.values(st.vassals).filter(v => v.status === 'active' && v.house !== st.player && v.location != null && canSee(st, st.player, v.location) && st.houses[v.house].ruler !== v.id);
           if (!cands.some(v => v.id === vassal)) vassal = cands[0]?.id ?? null;
           targetsBox.append(h('div.pick-list', ...cands.map(v => h('button.target' + (v.id === vassal ? '.on' : ''), { style: { display: 'grid', gridTemplateColumns: '44px 1fr', gap: '10px', alignItems: 'center' }, onclick: () => { vassal = v.id; sync(); } },
@@ -597,6 +634,79 @@ export class RealmUI {
     }, { wide: true, backdrop: ORDER_BACKDROP.diplomacy });
   }
 
+  // --------------------------------------------------------------- research
+  researchPanel() {
+    const st = this.state, me = st.player;
+    const t = techState(st, me);
+    const frag = h('div');
+    const pts = researchPoints(st, me);
+    const focus = t.focus && canResearch(st, me, t.focus) ? TECH_BY_ID[t.focus] : null;
+    frag.append(h('div.research-head', h('h2', { style: { fontSize: '18px' } }, 'Research'),
+      h('span.pts', `+${pts} points a month from markets · ${t.researched.length}/${TECHS.length} known`)));
+    frag.append(h('p.hint', `Click a tech to study it next. Markets earn points every month; a Study order adds ${studyPoints(0)}–${studyPoints(100)} more (the province's best Wits helps).`));
+    const detail = h('div.tech-detail');
+    const showDetail = tech => {
+      detail.innerHTML = '';
+      const known = hasTech(st, me, tech.id), cost = techCost(st, me, tech.id), prog = Math.floor(t.progress[tech.id] || 0);
+      detail.append(h('div', { style: { fontWeight: 600, color: BRANCHES[tech.branch].color } }, `${BRANCHES[tech.branch].icon} ${tech.name}`),
+        h('div', tech.text),
+        h('div.hint', known ? 'Known.' : `${prog}/${cost} points` + (tech.requires.length ? ` · needs ${tech.requires.map(r => TECH_BY_ID[r].name).join(' and ')}` : '') +
+          (!known && pts > 0 ? ` · about ${Math.ceil((cost - prog) / pts)} months from markets alone` : '')));
+    };
+    for (const b of BRANCH_IDS) {
+      const B = BRANCHES[b];
+      const box = h('div.branch');
+      box.append(h('div.branch-title', { '--bc': B.color }, `${B.icon} ${B.name}`, h('small', B.blurb)));
+      const graph = h('div.tech-graph');
+      for (let tier = 0; tier < 5; tier++) {
+        const col = h('div.tech-col');
+        for (const tech of techsOf(b).filter(x => x.tier === tier)) {
+          const known = hasTech(st, me, tech.id), avail = canResearch(st, me, tech.id);
+          const cost = techCost(st, me, tech.id), prog = t.progress[tech.id] || 0;
+          const cls = known ? '.known' : avail ? '.avail' : '.locked';
+          col.append(h('button.tech-node' + cls + (focus && focus.id === tech.id ? '.focus' : ''), {
+            '--bc': B.color, title: tech.text,
+            onmouseenter: () => showDetail(tech),
+            onclick: () => {
+              showDetail(tech);
+              if (!avail) return;
+              const r = setResearch(st, me, tech.id);
+              toast(r.msg, !r.ok); sfx('click'); this.render();
+            },
+          }, h('div.tn', tech.name), h('div.tc', known ? '✓ known' : avail ? `${Math.floor(prog)}/${cost}` : '🔒 ' + tech.requires.map(r => TECH_BY_ID[r].name).join(', ')),
+          !known && prog > 0 ? h('div.tp', h('i', { style: { width: Math.min(100, prog / cost * 100) + '%' } })) : null));
+        }
+        graph.append(col);
+      }
+      box.append(graph);
+      frag.append(box);
+    }
+    if (focus) showDetail(focus); else detail.append(h('div.hint', 'No research chosen: your scholars pick for you. Hover a tech for details.'));
+    frag.append(h('div.section-title', focus ? 'Studying' : 'Details'), detail);
+    return frag;
+  }
+
+  dlg_study(pid) {
+    const st = this.state, me = st.player;
+    const vs = provinceVassals(st, pid);
+    const best = vs.reduce((a, v) => Math.max(a, v.wits), 0);
+    const p = vs.length ? studyPoints(best) : 6;
+    const t = techState(st, me);
+    return modal(close => ({
+      title: 'Study',
+      body: [h('p.hint', `Scholars of ${PROVINCES[pid].name} add ${p} research points${vs.length ? ` (best Wits ${best})` : ' (no vassal here to guide them)'}.`),
+        h('div.target-grid',
+          ...(t.focus && canResearch(st, me, t.focus) ? [h('button.target.on', { onclick: () => close({ type: 'study', province: pid, tech: t.focus }) },
+            h('div.nm', TECH_BY_ID[t.focus].name), h('div.meta', 'Current research'))] : []),
+          ...BRANCH_IDS.map(b => {
+            const n = nextInBranch(st, me, b);
+            return h('button.target', { disabled: !n, '--hc': BRANCHES[b].color, onclick: () => close({ type: 'study', province: pid, branch: b }) },
+              h('div.nm', `${BRANCHES[b].icon} ${BRANCHES[b].name}`), h('div.meta', n ? `Next: ${n.name} (${Math.floor(t.progress[n.id] || 0)}/${techCost(st, me, n.id)})` : 'Branch complete'));
+          }))],
+      foot: [h('button.btn', { onclick: () => close(null) }, 'Cancel')],
+    }), { backdrop: ORDER_BACKDROP.council });
+  }
+
   // --------------------------------------------------------------- houses
   housesPanel() {
     const st = this.state;
@@ -611,8 +721,22 @@ export class RealmUI {
           h('div.nm', hs.name, hs.id === st.player ? ' (you)' : ''),
           h('div.meta', alive ? `${t.provinces} provinces · ${t.units ?? 0} units · ${t.vassals} vassals · ${fmt(t.soldiers)} soldiers` : 'Fallen'),
           alive ? h('div.power-bar', h('i', { style: { width: (t.power / max * 100) + '%' } })) : null,
-          t.shards.length ? h('div.meta', t.shards.map(s => '◆ ' + SPIRITS[s].name).join('  ')) : null),
+          t.shards.length ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: '3px' } }, ...shardStatus(st, hs.id).map(x => chargeMeter(x))) : null),
         h('div.rel', hs.id === st.player ? '' : relation(st, st.player, hs.id) || '')));
+    }
+    // Shard charge explained
+    const mine = shardStatus(st, st.player);
+    if (mine.length) {
+      const avg = Math.round(averageLoyalty(st, st.player));
+      frag.append(h('div.section-title', 'Your shards'));
+      frag.append(h('p.hint', `A spirit can be summoned only with a full charge, and the summon spends it. Shards recharge each month from the average loyalty of all your provinces: (loyalty − ${CHARGE_LOYALTY_FLOOR}) ÷ 2${hasTech(st, st.player, 'attunement') ? ', +50% from Shard Attunement' : ''}. Taxes, mustering and hunger slow your spirits.`));
+      for (const x of mine) {
+        const S = SPIRITS[x.id];
+        frag.append(h('div.charge-card', h('img', { src: art(S.art), style: { boxShadow: `0 0 10px ${S.color}` } }),
+          h('div', h('div.nm', S.name, h('span', { style: { color: 'var(--muted)', fontSize: '12px', marginLeft: '6px' } }, `in ${PROVINCES[x.province].name}`)),
+            chargeMeter(x), h('div.meta', x.ready ? 'Ready to summon.' : x.gain > 0 ? `Ready in about ${x.months} month${x.months > 1 ? 's' : ''}.` : `Not recharging: average loyalty ${avg} is too low.`))));
+      }
+      frag.append(h('p.hint', `Average loyalty ${avg} → +${chargeGain(st, st.player)} charge a month.`));
     }
     const caps = captivesOf(st, st.player);
     if (caps.length) {
@@ -626,10 +750,19 @@ export class RealmUI {
     const st = this.state;
     const list = h('div.log-list');
     for (const e of st.log.slice(-120)) {
-      list.append(h('div.log-item.' + (e.kind || 'info'), h('div.t', `${MONTHS[(e.turn) % 12]}, year ${412 + Math.floor(e.turn / 12)}`), e.text));
+      list.append(h('div.log-item.' + (e.kind || 'info'), h('div.t', `${MONTHS[(e.turn) % 12]}, year ${(st.startYear || 412) + Math.floor(e.turn / 12)}`), e.text));
     }
     return list;
   }
+}
+
+// A glowing charge meter for a shard ({ id, charge, gain, ready }).
+function chargeMeter(x, compact = false) {
+  const S = SPIRITS[x.id];
+  const tip = `${S.name}: ${x.charge}/${CHARGE_MAX}` + (x.ready ? ' · ready to summon' : x.gain > 0 ? ` · +${x.gain}/month` : ' · not recharging (loyalty too low)');
+  return h('span.charge' + (x.ready ? '.ready' : ''), { '--sc': S.color, title: tip },
+    h('span.gl', '◆'), h('span.cm', h('i', { style: { width: Math.min(100, x.charge / CHARGE_MAX * 100) + '%' } })),
+    compact ? null : h('span', x.ready ? 'ready' : `${x.charge}/${CHARGE_MAX}${x.gain > 0 ? ` +${x.gain}/mo` : ''}`));
 }
 
 function res(k, v, d, extra) {

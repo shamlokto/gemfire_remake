@@ -3,7 +3,11 @@
 import { PROVINCES, ADJACENCY, MAP_W, MAP_H, PROVINCE_DEFAULTS, NEUTRAL_MILITIA, SEASONS, MONTHS, START_YEAR, SEA_LANES, isSeaLane, VICTORY_PROVINCES } from './data/world.js';
 import { landShapes, LAND_PALETTE, LAND_EDGES } from './ui/landshape.js';
 import { HOUSES, HOUSE_BY_ID, HOUSE_START } from './data/houses.js';
-import { VASSALS } from './data/vassals.js';
+import { VASSALS, WANDERERS, HEIRS } from './data/vassals.js';
+import { TECHS, TECH_BY_ID, BRANCHES, BRANCH_IDS, TECH_COST, TECH_INFLATION, techsOf } from './data/tech.js';
+import { SCENARIOS } from './data/scenarios.js';
+import { CHARGE_MAX, CHARGE_LOYALTY_FLOOR, CHARGE_RATE, MARKET_PER_POINT, studyPoints } from './realm/tech.js';
+import { DIPLOMACY } from './realm/diplomacy.js';
 import { TROOPS, COMPANIES, MILITIA, MAX_SOLDIERS, MAX_VASSALS_PER_PROVINCE, MAX_UNITS_PER_PROVINCE, MAX_UNITS_PER_ARMY, ROUT_LED, ROUT_LEADERLESS } from './data/units.js';
 import { SPIRITS, SPIRIT_UNIT } from './data/spirits.js';
 import { RANDOM_EVENTS, STORY } from './data/events.js';
@@ -99,11 +103,12 @@ function howToPlay() {
   <tr><td><b>Train</b></td><td>Drill one unit or the whole garrison: training +10 + leader's Might / 10 (+8 with no leader), up to 100. Training multiplies damage.</td><td>—</td></tr>
   <tr><td><b>Assign leader</b></td><td>Put a vassal at the head of a unit, or take them off it. <i>Free: does not use the month's order.</i></td><td>—</td></tr>
   <tr><td><b>Disband</b></td><td>Send a unit home; loyalty +2.</td><td>—</td></tr>
-  <tr><td><b>Hire / Dismiss</b></td><td>Hire one company for the province (or send it away).</td><td>hire fee, then a monthly wage</td></tr>
+  <tr><td><b>Hire / Dismiss</b></td><td>Hire one company for the province (or send it away). Some need a tech (Black Powder).</td><td>hire fee, then a monthly wage</td></tr>
   <tr><td><b>March</b></td><td>Send up to ${MAX_UNITS_PER_ARMY} units, their leaders, any other vassals, and a 5th slot (the hired company or a summoned spirit) with food to a neighbouring province, over land or by sea lane. Your own province: a transfer. Anyone else's: an attack, which needs at least one vassal in command. At most ${MAX_VASSALS_PER_PROVINCE} vassals per province.</td><td>food carried</td></tr>
   <tr><td><b>Supply</b></td><td>Send food and gold to a neighbouring province you own.</td><td>—</td></tr>
   <tr><td><b>Govern</b></td><td>Feast: 20 food for loyalty +8. Tax: gold equal to Market, loyalty −10.</td><td>food / loyalty</td></tr>
-  <tr><td><b>Diplomacy</b></td><td>Truce, demand tribute, marriage pact, or bribe an enemy vassal.</td><td>gold</td></tr>
+  <tr><td><b>Diplomacy</b></td><td>Truce, demand tribute, marriage pact, bribe an enemy vassal, or <a href="#wanderers">invite a wanderer</a> standing in or next to the province.</td><td>gold</td></tr>
+  <tr><td><b>Study</b></td><td>Scholars add ${studyPoints(0)}–${studyPoints(100)} <a href="#research">research</a> points (best Wits in the province helps) to a branch or your current research.</td><td>—</td></tr>
   <tr><td><b>Spy</b></td><td>Reveal a province's stats and garrison.</td><td>—</td></tr>
   <tr><td><b>Recruit</b></td><td>Try to win over a captive vassal.</td><td>—</td></tr>
   <tr><td><b>Rest</b></td><td>Do nothing this month.</td><td>—</td></tr>
@@ -221,9 +226,53 @@ function charactersSec() {
     return `<details class="group" open><summary><span class="swatch" style="background:${h.color}"></span><b>${esc(h.name)}</b>
       <span>${list.length} characters</span></summary><div class="body"><div class="people">${people}</div></div></details>`;
   }).join('');
+  const person = (v, extra) => `<div class="person" id="v-${v.id}">
+        ${img(v.portrait, { style: 'width:72px;height:90px', alt: v.name })}
+        <div class="who"><b>${esc(v.name)}</b>
+        <div class="role">${esc(v.title)}</div>
+        <div class="bars">${bar('Might', v.might, '#d9614a')}${bar('Wits', v.wits, '#5aa0e0')}${bar('Charm', v.charm, '#d9a94a')}</div>
+        <div class="troop">${extra}</div></div></div>`;
+  const wand = WANDERERS.map(v => person(v, `Wanders ${plink(v.at)} with ${v.soldiers} ${esc(TROOPS[v.troop]?.name ?? v.troop)}`)).join('');
+  const heirs = HEIRS.map(v => person(v, `Heir of ${esc(HOUSE_BY_ID[v.house].short)} · comes of age in year ${START_YEAR + v.years} (scenario year + ${v.years}) with ${v.soldiers} ${esc(TROOPS[v.troop]?.name ?? v.troop)}`)).join('');
   return `${sec('characters', 'Characters', 'The realm')}
-  <p>Might adds to attack and defence in battle; Wits drives development, spying and tactics; Charm sways diplomacy and the
-  loyalty of the province a vassal governs; Loyalty is how firmly they serve their house.</p>${groups}`;
+  <p>Might adds to attack and defence in battle; Wits drives development, spying, research and tactics; Charm sways diplomacy and the
+  loyalty of the province a vassal governs; Loyalty is how firmly they serve their house.</p>${groups}
+  ${sec('wanderers', 'Wanderers and heirs', 'The realm')}
+  <p><b>Wanderers</b> are free swords with no house: ${WANDERERS.length} of them roam the free holds, and each January some drift to a
+  neighbouring province. Invite one by Diplomacy (${DIPLOMACY.wanderer.cost} gold in gifts) from the province they stand in or a neighbour: the
+  envoy's Charm decides, and each refusal makes the next offer likelier. When a province falls, the wanderers in it may offer their service to
+  the conqueror. A wanderer who joins brings their band as a unit they lead.</p>
+  <details class="group" open><summary><b>Wanderers</b><span>${WANDERERS.length} characters</span></summary><div class="body"><div class="people">${wand}</div></div></details>
+  <p><b>Heirs</b>: each house has an heir who comes of age some years into the game and appears at the capital with a unit. If the house has
+  fallen by then, the heir takes to the roads as a wanderer.</p>
+  <details class="group"><summary><b>Heirs</b><span>${HEIRS.length} characters</span></summary><div class="body"><div class="people">${heirs}</div></div></details>`;
+}
+
+function researchSec() {
+  const branches = BRANCH_IDS.map(b => {
+    const B = BRANCHES[b];
+    const rows = techsOf(b).map(t => `<tr id="tech-${t.id}"><td><b>${esc(t.name)}</b></td><td class="num">${TECH_COST[t.tier]}</td>
+      <td>${t.requires.length ? t.requires.map(r => `<a href="#tech-${r}">${esc(TECH_BY_ID[r].name)}</a>`).join(', ') : '—'}</td><td>${esc(t.text)}</td></tr>`).join('');
+    return `<details class="group" open><summary><span class="swatch" style="background:${B.color}"></span><b>${B.icon} ${esc(B.name)}</b><span>${esc(B.blurb)}</span></summary>
+      <div class="body"><div class="xwrap"><table class="xtable"><thead><tr><th>Tech</th><th>Base cost</th><th>Needs</th><th>Effect</th></tr></thead><tbody>${rows}</tbody></table></div></div></details>`;
+  }).join('');
+  return `${sec('research', 'Research', 'How to play')}
+  <p>Each house researches ${TECHS.length} techs in four branches. Every month its markets earn 1 point per ${MARKET_PER_POINT} Market across all its
+  provinces, and a <b>Study</b> order adds ${studyPoints(0)}–${studyPoints(100)} more. Points go into the tech you chose on the Research tab (or one
+  your scholars pick). A tech's cost is its base cost × (1 + ${TECH_INFLATION} × techs already known), so later techs cost more.</p>${branches}`;
+}
+
+function scenariosSec() {
+  const cards = SCENARIOS.map(sc => {
+    const lands = Object.entries(sc.owners || {}).map(([h, ps]) => `${esc(HOUSE_BY_ID[h].short)} ${ps.length}`).join(', ');
+    return `<div class="card ev" id="sc-${sc.id}">${img(sc.art, { alt: sc.name })}<div><h3>${esc(sc.name)}</h3>
+      <p class="role">Year ${sc.year} · ${esc(sc.difficulty || '')}</p><p>${esc(sc.blurb)}</p>
+      ${lands ? `<p class="note">Changed lands: ${lands}.</p>` : ''}${sc.techs ? `<p class="note">Starting techs: ${Object.entries(sc.techs).map(([h, ts]) => `${esc(HOUSE_BY_ID[h].short)} (${ts.map(t => TECH_BY_ID[t].name).join(', ')})`).join('; ')}.</p>` : ''}
+      ${sc.marriages ? `<p class="note">${sc.marriages.length} marriage pacts bind the alliances for ${sc.marriages[0][2]} months.</p>` : ''}</div></div>`;
+  }).join('');
+  return `${sec('scenarios', 'Scenarios', 'Varenhold')}
+  <p>New Game offers ${SCENARIOS.length} starting moments of the war. Every scenario uses the same rules and victory conditions.</p>
+  <div class="cards" style="grid-template-columns:minmax(0,1fr)">${cards}</div>`;
 }
 
 function provinceMap() {
@@ -299,7 +348,9 @@ function troopsSec() {
     <td class="num">${t.cost}</td><td class="num">${t.upkeep}</td><td>${esc(bonusText(t.bonusVs))}</td><td>${esc(t.note)}</td></tr>`).join('');
   const crow = Object.entries(COMPANIES).map(([k, c]) => {
     const traits = [bonusText(c.bonusVs), c.flying && 'flies over mountains', c.ignoresTerrain && 'ignores terrain',
-      c.heals && `heals ${pct(c.heals)} of nearby troops per round`].filter(Boolean).join('; ');
+      c.heals && `heals ${pct(c.heals)} of nearby troops per round`, c.requires && `needs ${TECH_BY_ID[c.requires].name}`,
+      c.monster && 'monster (cheaper with Beast-Taming)', c.terrainBonus && Object.entries(c.terrainBonus).map(([t, m]) => `×${m} attack in ${t}`).join(', '),
+      c.loyaltyHit && `loyalty −${c.loyaltyHit} when hired`, !c.wage && 'no wages'].filter(Boolean).join('; ');
     return `<tr><td>${img(c.sprite, { cls: 'sprite', contain: true, alt: c.name })}</td><td><b>${esc(c.name)}</b></td>
     <td class="num">${c.atk}</td><td class="num">${c.def}</td><td class="num">${c.move}</td><td class="num">${c.range}</td>
     <td class="num">${c.size}</td><td class="num">${c.hire}</td><td class="num">${c.wage}</td><td>${esc(traits)}</td></tr>`;
@@ -333,9 +384,16 @@ function spiritsSec() {
       ${img(s.fx, { style: 'width:72px;height:72px;margin-left:auto', alt: s.spell + ' effect' })}</div>`;
   }).join('');
   return `${sec('spirits', 'Spirits', 'Armies')}
-  <p>A house holding a spirit's shard can summon the spirit into one battle per season as the army's <b>5th unit</b>,
-  if one of its vassals fights there. The spirit fights on the board like any unit, casts its spell once in that battle,
-  and is banished (leaves the field) if its essence falls too low. A shard sits in its province: take the province and you take the shard.</p>
+  <p>A house holding a spirit's shard can summon the spirit into a battle as the army's <b>5th unit</b>, if one of its vassals fights there.
+  The spirit fights on the board like any unit, casts its spell once in that battle, and is banished (leaves the field) if its essence falls too low.
+  A shard sits in its province: take the province and you take the shard. Spirits are usually stronger than hired companies, with a few rivals.</p>
+  <h3 id="charge" style="margin:14px 0 6px">Shard charge</h3>
+  <p>Each shard holds a <b>charge</b> from 0 to ${CHARGE_MAX}. Summoning its spirit needs a full charge and spends all of it, whether the battle is won or
+  lost. Every month each shard a house holds recharges by <code>(average loyalty of all its provinces − ${CHARGE_LOYALTY_FLOOR}) × ${CHARGE_RATE}</code>:
+  at loyalty 75 that is +20 a month (a summon every five months), at 55 it is +10, and at ${CHARGE_LOYALTY_FLOOR} or below the spirits sleep. Taxes,
+  mustering and hunger all lower loyalty, so a house that squeezes its people loses its spirits. A captured shard starts empty.
+  <a href="#tech-attunement">Shard Attunement</a> recharges 50% faster; <a href="#tech-lantern_lore">Lantern Lore</a> adds essence and leaves 20 charge after a summon;
+  an enemy's <a href="#tech-warding">Warding</a> weakens your spirit against them.</p>
   <div class="cards">${cards}</div>`;
 }
 
@@ -445,7 +503,7 @@ function makeSortable(root) {
 
 async function main() {
   await loadArtManifest();
-  const parts = [overview(), howToPlay(), battles(), housesSec(), charactersSec(), provincesSec(),
+  const parts = [overview(), scenariosSec(), howToPlay(), researchSec(), battles(), housesSec(), charactersSec(), provincesSec(),
     troopsSec(), spiritsSec(), eventsSec(), await gallerySec()];
   const article = $('wiki');
   article.innerHTML = parts.join('\n');

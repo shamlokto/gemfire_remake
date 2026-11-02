@@ -85,12 +85,12 @@ export class ClashScene {
       : (this.short ? (this.dHolds ? this.contactD : this.contactD + 30) : (this.dHolds ? this.contactD : 330));
     for (let i = 0; i < n; i++) {
       const rank = big ? 0 : i % 2, file = big ? i : (i >> 1);
-      const gap = MOUNTED.has(u.type) ? 40 : big ? 70 : 24;
+      const gap = MOUNTED.has(u.type) ? 46 : big ? 80 : 26;
       const x = side === 'attacker' ? startFront - file * gap - rank * 10 : startFront + file * gap + rank * 10;
       const y = (u.type === 'wyvern' ? 150 : rank ? BACK_Y : FRONT_Y) + (this.r() - 0.5) * 4;
       this.actors.push({
         id: `${side[0]}${i}`, side, type: u.kind === 'spirit' ? 'spirit' : u.type, spirit: u.spirit, kind: u.kind,
-        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 110 : 34,
+        x, y, px: x, py: y, homeX: x, tx: x, rank, file, facing: dir, s: u.kind === 'spirit' ? 92 : (u.type === 'siege' || u.type === 'bombards') ? 58 : 40,
         walk: this.r() * 6, moving: false, run: false, act: 'idle', actF0: 0, actLen: 1,
         dead: false, deadF: 0, flee: false, fleeF: 0, alpha: 1, glow: 0,
       });
@@ -235,7 +235,7 @@ export class ClashScene {
             const tx = tgt ? tgt.x + 8 : 320, ty = tgt ? tgt.y : FRONT_Y;
             const from = { x: s.x + 14, y: s.y - (A.type === 'siege' ? 42 : 14) };
             const flight = A.type === 'siege' ? 54 : tl.flight;
-            this.shots.push({ kind: A.type === 'siege' ? 'stone' : 'ball', x0: from.x, y0: from.y, x1: tx, y1: ty - 6, f0: f, f1: f + flight, arc: A.type === 'siege' ? 120 : 18 });
+            this.shots.push({ kind: A.type === 'siege' ? 'stone' : 'ball', x0: from.x, y0: from.y, x1: tx, y1: ty - 6, f0: f, f1: f + flight, arc: A.type === 'siege' ? 64 : 14 });
             this.emit({ k: 'sfx', name: 'catapult' });
             if (A.type === 'bombards') this.emit({ k: 'muzzle', x: from.x + 10, y: from.y, big: true });
           } else {

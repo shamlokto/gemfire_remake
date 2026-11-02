@@ -175,10 +175,44 @@ export class ClashRenderer {
     return b;
   }
 
+  // Static layers per size: light shafts, ground strip with tufts, grade + vignette.
+  layers(W2, bandH, S, ox, oyRel) {
+    const key = `${W2 | 0}x${bandH | 0}`;
+    if (this.L && this.Lkey === key) return this.L;
+    const mk = () => { const c = canvasOf(W2, bandH); return [c, c.getContext('2d')]; };
+    const [shafts, sg] = mk(), [ground, gg] = mk(), [grade, rg] = mk();
+    const shaftCol = this.o.weather === 'rain' ? '160,180,220' : this.o.season === 2 ? '255,190,120' : '255,235,190';
+    for (let i = 0; i < 4; i++) {
+      const x = W2 * (0.15 + i * 0.25);
+      const gr = sg.createLinearGradient(x, 0, x - bandH * 0.4, bandH);
+      gr.addColorStop(0, `rgba(${shaftCol},${this.o.weather === 'fog' ? 0.04 : 0.08})`); gr.addColorStop(1, `rgba(${shaftCol},0)`);
+      sg.fillStyle = gr; sg.beginPath(); sg.moveTo(x, 0); sg.lineTo(x + W2 * 0.06, 0); sg.lineTo(x - bandH * 0.35, bandH); sg.lineTo(x - bandH * 0.5, bandH); sg.fill();
+    }
+    const gr0 = GROUND[this.o.terrain] || GROUND.plains, snow = this.o.season === 3;
+    const gy = oyRel + 138 * S;
+    const ggr = gg.createLinearGradient(0, gy, 0, oyRel + SH * S + 10);
+    ggr.addColorStop(0, 'rgba(0,0,0,0)'); ggr.addColorStop(0.25, snow ? '#dfe6ee' : gr0[0]); ggr.addColorStop(1, snow ? '#a8b4c2' : gr0[1]);
+    gg.fillStyle = ggr; gg.fillRect(0, gy, W2, bandH - gy);
+    gg.fillStyle = snow ? 'rgba(255,255,255,0.5)' : 'rgba(20,40,10,0.45)';
+    for (let i = 0; i < 90; i++) {
+      const x = ((i * 97.3) % SW) * S + ox - SW * S * 0.1 + ((i * 37) % 3) * S * 40, y = oyRel + (150 + (i * 13) % 45) * S;
+      gg.fillRect(x, y, Math.max(1, S * 1.2), Math.max(1, S * (2 + (i % 3))));
+    }
+    if (this.o.terrain === 'marsh') { gg.fillStyle = 'rgba(60,90,90,0.35)'; for (let i = 0; i < 8; i++) { gg.beginPath(); gg.ellipse(((i * 131) % W2), oyRel + (160 + (i * 17) % 30) * S, 40 * S * 0.4, 6 * S * 0.4, 0, 0, 7); gg.fill(); } }
+    rg.globalCompositeOperation = 'source-over';
+    const tint = GRADE[this.o.weather] || GRADE[this.o.season];
+    if (tint) { rg.fillStyle = tint; rg.fillRect(0, 0, W2, bandH); }
+    const vg = rg.createRadialGradient(W2 / 2, bandH / 2, bandH * 0.3, W2 / 2, bandH / 2, Math.max(W2, bandH) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+    rg.fillStyle = vg; rg.fillRect(0, 0, W2, bandH);
+    this.L = { shafts, ground, grade }; this.Lkey = key;
+    return this.L;
+  }
+
   // ---------------------------------------------------------------- frame
   render(cg, W2, H2, alpha, open) {
     const sc = this.sc, f = sc.f + alpha, t = f / 60;
-    const bandH = Math.min(H2 * 0.78, W2 * 0.66), bandY = (H2 - bandH) / 2;
+    const bandH = Math.min(H2 * 0.78, W2 * (W2 < 600 ? 0.95 : 0.66)), bandY = (H2 - bandH) / 2;
     const h = bandH * open, y0 = H2 / 2 - h / 2;
     cg.save();
     cg.fillStyle = `rgba(4,3,8,${0.6 * open})`; cg.fillRect(0, 0, W2, H2);
@@ -198,28 +232,12 @@ export class ClashRenderer {
     // backdrop with a slow pan
     const bg = this.backdrop(W2, bandH);
     cg.drawImage(bg, -((f * 0.25) % (bg.width - W2 + 1)) * 0.3 - bg.width * 0.02, bandY, bg.width, bandH);
-    // light shafts
+    // light shafts (baked, drifting) and the in-focus ground strip (baked)
+    const L = this.layers(W2, bandH, S, ox, oy - bandY);
     cg.save(); cg.globalCompositeOperation = 'lighter';
-    const shaftCol = this.o.weather === 'rain' ? '160,180,220' : this.o.season === 2 ? '255,190,120' : '255,235,190';
-    for (let i = 0; i < 4; i++) {
-      const x = W2 * (0.15 + i * 0.25) + Math.sin(t * 0.3 + i) * W2 * 0.03;
-      const gr = cg.createLinearGradient(x, bandY, x - bandH * 0.4, bandY + bandH);
-      gr.addColorStop(0, `rgba(${shaftCol},${this.o.weather === 'fog' ? 0.04 : 0.08})`); gr.addColorStop(1, `rgba(${shaftCol},0)`);
-      cg.fillStyle = gr; cg.beginPath(); cg.moveTo(x, bandY); cg.lineTo(x + W2 * 0.06, bandY); cg.lineTo(x - bandH * 0.35, bandY + bandH); cg.lineTo(x - bandH * 0.5, bandY + bandH); cg.fill();
-    }
+    cg.drawImage(L.shafts, Math.sin(t * 0.3) * W2 * 0.02, bandY);
     cg.restore();
-    // ground strip (sharp, in focus)
-    const gr0 = GROUND[this.o.terrain] || GROUND.plains;
-    const gy = oy + 138 * S;
-    const ggr = cg.createLinearGradient(0, gy, 0, oy + SH * S + 10);
-    ggr.addColorStop(0, 'rgba(0,0,0,0)'); ggr.addColorStop(0.25, this.o.season === 3 ? '#dfe6ee' : gr0[0]); ggr.addColorStop(1, this.o.season === 3 ? '#a8b4c2' : gr0[1]);
-    cg.fillStyle = ggr; cg.fillRect(0, gy, W2, bandY + bandH - gy);
-    // tufts and stones (deterministic)
-    cg.fillStyle = this.o.season === 3 ? 'rgba(255,255,255,0.5)' : 'rgba(20,40,10,0.45)';
-    for (let i = 0; i < 60; i++) {
-      const x = ((i * 97.3) % SW) * S + ox - SW * S * 0.1 + ((i * 37) % 3) * S * 40, y = oy + (150 + (i * 13) % 45) * S;
-      cg.fillRect(x, y, Math.max(1, S * 1.2), Math.max(1, S * (2 + (i % 3))));
-    }
+    cg.drawImage(L.ground, 0, bandY);
     // shadows
     const actors = sc.actors.slice().sort((p, q) => p.y - q.y);
     for (const a of actors) {
@@ -242,7 +260,7 @@ export class ClashRenderer {
       if (a.type === 'spirit') {
         const al = a.dead ? clamp(1 - (f - a.deadF) / 40, 0, 1) : 1;
         if (al <= 0) continue;
-        const lift = a.spirit === 'gale' || a.spirit === 'dusk' ? 70 : a.spirit === 'tide' ? 44 : 50;
+        const lift = (a.spirit === 'gale' || a.spirit === 'dusk' ? 0.75 : a.spirit === 'tide' ? 0.3 : 0.42) * a.s;
         drawSpirit(cg, a.spirit, x, y - lift * S, a.s * S, t, { facing: a.facing, run: a.moving ? 1 : 0, alpha: al });
         continue;
       }
@@ -291,16 +309,8 @@ export class ClashRenderer {
     }
     // particles
     this.P.draw(cg, S, ox, oy);
-    // colour grading and vignette
-    cg.save();
-    cg.globalCompositeOperation = 'soft-light';
-    cg.fillStyle = GRADE[this.o.weather] || GRADE[this.o.season] || 'rgba(0,0,0,0)';
-    cg.fillRect(0, bandY, W2, bandH);
-    cg.globalCompositeOperation = 'source-over';
-    const vg = cg.createRadialGradient(W2 / 2, H2 / 2, bandH * 0.3, W2 / 2, H2 / 2, Math.max(W2, bandH) * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
-    cg.fillStyle = vg; cg.fillRect(0, bandY, W2, bandH);
-    cg.restore();
+    // colour grading and vignette (baked)
+    cg.drawImage(L.grade, 0, bandY);
     if (this.whiteout > 0.01) { cg.fillStyle = `rgba(${this.flashCol.map(v => v | 0)},${this.whiteout})`; cg.fillRect(0, bandY, W2, bandH); }
     cg.restore();
     // letterbox bars, HUD (outside the camera)
@@ -314,25 +324,28 @@ export class ClashRenderer {
     cg.fillStyle = '#07060a'; cg.fillRect(0, y0, W2, bar); cg.fillRect(0, y0 + h - bar, W2, bar);
     cg.fillStyle = '#d8b05a'; cg.fillRect(0, y0 + bar, W2, 1.5); cg.fillRect(0, y0 + h - bar - 1.5, W2, 1.5);
     const c = sc.counts(alpha);
-    const fs = Math.max(11, bar * 0.36);
-    const pw = bar * 1.7, ph = pw * 1.15;
+    const fs = Math.max(10, Math.min(bar * 0.36, W2 / 48));
+    const pw = bar * (W2 < 600 ? 1.25 : 1.7), ph = pw * 1.15;
     const side = (s, left) => {
       const info = o.names[s];
       const px = left ? 12 : W2 - 12 - pw;
       const py = y0 + h - bar - ph * 0.62;
       o.drawPortrait(cg, s, px, py, pw, ph, !left);
-      o.drawCrest(cg, s, left ? px + pw + bar * 0.45 : px - bar * 0.45, y0 + bar * 0.5, bar * 0.7);
-      const tx = left ? px + pw + bar * 0.95 : px - bar * 0.95, al = left ? 'left' : 'right';
-      txt(cg, info.house, tx, y0 + bar * 0.42, fs * 0.82, info.col, al, 700);
-      txt(cg, info.title, tx, y0 + bar * 0.82, fs * 0.72, '#e8dcc0', al, 500, 'EB Garamond');
+      const narrow = W2 < 600;
+      if (!narrow) o.drawCrest(cg, s, left ? px + pw + bar * 0.45 : px - bar * 0.45, y0 + bar * 0.5, bar * 0.7);
+      const tx = narrow ? (left ? 10 : W2 - 10) : left ? px + pw + bar * 0.95 : px - bar * 0.95, al = left ? 'left' : 'right';
+      txt(cg, narrow ? info.house.replace(/^(House|Clan|Order of|Vey) /, '') : info.house, tx, y0 + bar * 0.42, fs * 0.82, info.col, al, 700);
+      if (!narrow) txt(cg, info.title, tx, y0 + bar * 0.82, fs * 0.72, '#e8dcc0', al, 500, 'EB Garamond');
       const n = s === 'attacker' ? c.att : c.def;
-      txt(cg, String(n), left ? px + pw + 10 : px - 10, y0 + h - bar * 0.3, fs * 1.55, '#ffffff', al, 900);
-      txt(cg, 'soldiers', left ? px + pw + 12 + cg.measureText(String(n)).width * 0 + fs * 2.6 : px - 12 - fs * 2.6, y0 + h - bar * 0.3, fs * 0.62, '#cbb98e', al, 500, 'EB Garamond');
-      if (info.noLeader) txt(cg, 'NO LEADER', left ? px + pw / 2 : px + pw / 2, py - 4, fs * 0.6, '#cbb98e', 'center', 700);
+      const nx = left ? px + pw + 10 : px - 10;
+      txt(cg, String(n), nx, y0 + h - bar * 0.3, fs * 1.55, '#ffffff', al, 900);
+      const nw = cg.measureText(String(n)).width;
+      txt(cg, 'soldiers', left ? nx + nw + 6 : nx - nw - 6, y0 + h - bar * 0.3, fs * 0.62, '#cbb98e', al, 500, 'EB Garamond');
     };
     side('attacker', true); side('defender', false);
-    // centre: what is happening
-    txt(cg, o.caption || '', W2 / 2, y0 + bar * 0.62, fs * 0.9, '#f5ead0', 'center', 700);
+    // centre: what is happening (on narrow screens it goes under the top bar instead)
+    if (W2 >= 760) txt(cg, o.caption || '', W2 / 2, y0 + bar * 0.62, fs * 0.9, '#f5ead0', 'center', 700);
+    else txt(cg, o.caption || '', W2 / 2, y0 + bar + fs * 1.3, fs * 0.85, '#f5ead0', 'center', 700);
     cg.restore();
     // kill numbers and labels over the scene
     const mid = W2 / 2;

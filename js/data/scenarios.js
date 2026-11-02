@@ -37,7 +37,7 @@ export const SCENARIOS = [
     techs: { aldmere: ['crop_rotation'], isolde: ['markets'], seraphine: ['attunement'], corvane: ['drill_yards'] },
   },
   {
-    id: 'lastshard', name: 'The Last Shard', year: 431, art: 179,
+    id: 'lastshard', name: 'The Last Shard', year: 431, art: 222,
     blurb: 'Nineteen years of war. Three great powers (Corvane in the north, Seraphine in the south and Isolde\'s fleets in the east and west) divide the realm. Aldmere, Hrothgar and Vey cling to their homelands with veteran armies. No free holds remain.',
     difficulty: 'Hard',
     owners: {

@@ -493,7 +493,7 @@ export async function runBattle(container, input, opts = {}) {
   // ---- squads: 1-6 remastered figures per unit by strength, each with its own life
   function squadOf(u, d) {
     const N = squadSize(u.type);
-    const want = u.out && !d.flee ? 0 : clamp(Math.ceil(N * d.shown / u.start - 1e-9), d.shown > 0 ? 1 : 0, N);
+    const want = clamp(Math.round(N * d.shown / u.start), d.shown > 0 ? 1 : 0, N);
     if (!d.squad) {
       d.squad = formation(N).map((pos, i) => ({ pos, i, dieT: null, ph: hash(i, u.x + u.y, 3) * 6.28 }));
       d.squad.forEach((f, i) => { if (i >= want) f.dieT = -1e9; });
@@ -543,7 +543,7 @@ export async function runBattle(container, input, opts = {}) {
     if (!isSpirit(u)) {
       const squad = squadOf(u, d);
       const n = squad.length;
-      const s = cs * (n >= 5 ? 0.5 : n >= 3 ? 0.56 : n === 2 ? 0.62 : 0.7) * (u.type === 'siege' || u.type === 'bombards' ? 0.95 : 1);
+      const s = cs * (n >= 5 ? 0.54 : n >= 3 ? 0.58 : n === 2 ? 0.64 : 0.72) * (u.type === 'siege' || u.type === 'bombards' ? 0.95 : 1);
       const order = squad.slice().sort((p, q) => p.pos[1] - q.pos[1]);
       // soft shadows first
       for (const f of order) {
@@ -595,7 +595,7 @@ export async function runBattle(container, input, opts = {}) {
     const fs = Math.max(9, Math.round(cs * 0.24));
     g.font = `700 ${fs}px Cinzel, Georgia, serif`; g.textAlign = 'center';
     const label = String(d.shown), tw = g.measureText(label).width + 6;
-    const tx = cx + cs * 0.3 * facing, ty = cy - cs * 0.34;
+    const tx = cx + cs * 0.12 * facing, ty = cy - cs * 0.5;
     g.fillStyle = 'rgba(15,12,18,0.85)'; g.beginPath(); g.roundRect(tx - tw / 2, ty - fs * 0.8, tw, fs * 1.05, 3); g.fill();
     g.strokeStyle = rgba(S[u.side].color, 0.9); g.lineWidth = 1; g.stroke();
     g.fillStyle = '#f5ead0'; g.fillText(label, tx, ty);
@@ -860,8 +860,13 @@ export async function runBattle(container, input, opts = {}) {
   }
 
   // ---- the clash: a pre-fight info screen, then the animated scene (choreo.js + clashfx.js)
-  const verbOf = u => isSpirit(u) ? 'strikes' : MOUNTED.has(u.type) ? 'charge' : u.type === 'siege' || POWDER.has(u.type) ? 'open fire' :
-    u.type === 'archers' || u.type === 'bandits' ? 'loose' : u.type === 'wyvern' ? 'dives' : 'attack';
+  // "Ser Halden Brook charges" / "Footmen attack": one named subject or a plural troop.
+  const verbOf = u => {
+    const one = !!vassalOf(u) || isSpirit(u) || u.type === 'wyvern' || u.type === 'golem';
+    const v = isSpirit(u) ? ['strikes', 'strike'] : MOUNTED.has(u.type) ? ['charges', 'charge'] : u.type === 'siege' || POWDER.has(u.type) ? ['opens fire', 'open fire'] :
+      u.type === 'archers' || u.type === 'bandits' || u.type === 'druids' ? ['looses', 'loose'] : u.type === 'wyvern' ? ['dives', 'dive'] : ['attacks', 'attack'];
+    return one ? v[0] : v[1];
+  };
   const terrName = u => { const tt = TERRAIN[terrainAt(b, u.x, u.y)]; return tt ? `${tt.name}${tt.def !== 1 ? ` ×${tt.def}` : ''}` : '—'; };
   const typeName = u => isSpirit(u) ? 'Summoned spirit' : statsOf(u.type).name;
   const leaderLine = u => vassalOf(u) ? `${vassalOf(u).name}, ${vassalOf(u).title}` : isSpirit(u) ? SPIRITS[u.type].spell : u.kind === 'company' ? 'Hired company' : u.kind === 'militia' ? 'Local militia' : 'No leader';
@@ -896,7 +901,7 @@ export async function runBattle(container, input, opts = {}) {
         hit: { killed: hit.killed, ranged: !!hit.ranged, rout: !!hit.rout }, counter: counter ? { killed: counter.killed, rout: !!counter.rout } : null,
       };
       const scene = new ClashScene(cfg);
-      const nm = u => ({ house: S[u.side].full, title: `${typeName(u)} · ${vassalOf(u) ? vassalOf(u).name : roleOf(u)}`, col: shade(S[u.side].color, 0.45),
+      const nm = u => ({ house: S[u.side].full, title: isSpirit(u) ? `Summoned spirit · ${SPIRITS[u.type].spell}` : `${typeName(u)} · ${vassalOf(u) ? vassalOf(u).name : roleOf(u)}`, col: shade(S[u.side].color, 0.45),
         noLeader: !vassalOf(u) && !isSpirit(u) && (u.kind === 'troop' || u.kind === 'militia') });
       const fx = new ClashRenderer(scene, {
         colours: { attacker: { color: S[att.side].color, accent: S[att.side].accent }, defender: { color: S[def.side].color, accent: S[def.side].accent } },
@@ -1604,6 +1609,9 @@ export async function runBattle(container, input, opts = {}) {
       const c = forestCells[(Math.random() * forestCells.length) | 0], p = px(c.x, c.y);
       view.P.leaves(p.x, p.y - view.cs * 0.3, 1);
     }
+    // while a clash scene covers the board, redraw the board only every third frame
+    view.fc = (view.fc || 0) + 1;
+    if (view.cutin && view.cutin.scene && view.fc % 3) { drawCutin(real); requestAnimationFrame(frame); return; }
     view.P.step(dt);
     g.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
     g.clearRect(0, 0, view.w, view.h);

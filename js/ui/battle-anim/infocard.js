@@ -10,7 +10,7 @@ const easeOut = t => 1 - Math.pow(1 - t, 3);
 export function drawInfoCard(cg, W2, H2, k, d) {
   const open = k < 0.12 ? easeOut(k / 0.12) : k > 0.9 ? easeOut((1 - k) / 0.1) : 1;
   cg.fillStyle = `rgba(4,3,8,${0.62 * open})`; cg.fillRect(0, 0, W2, H2);
-  const pw = Math.min(W2 * 0.94, 760), ph = Math.min(H2 * 0.7, pw * 0.56);
+  const pw = Math.min(W2 * 0.94, 760), ph = Math.min(H2 * 0.78, Math.max(pw * 0.56, 330));
   const x0 = (W2 - pw) / 2, y0 = (H2 - ph) / 2;
   cg.save();
   cg.globalAlpha = open;
@@ -18,7 +18,7 @@ export function drawInfoCard(cg, W2, H2, k, d) {
   gr.addColorStop(0, 'rgba(34,26,38,0.96)'); gr.addColorStop(1, 'rgba(16,12,20,0.96)');
   cg.fillStyle = gr; cg.beginPath(); cg.roundRect(x0, y0, pw, ph, 10); cg.fill();
   cg.strokeStyle = '#d8b05a'; cg.lineWidth = 1.5; cg.stroke();
-  const fs = Math.max(11, ph * 0.05);
+  const fs = Math.max(10, Math.min(ph * 0.05, pw * 0.032));
   txt(cg, d.caption, W2 / 2, y0 + fs * 1.8, fs * 1.3, '#f3d38a', 'center', 900);
   const col = (side, left) => {
     const s = d.sides[side];

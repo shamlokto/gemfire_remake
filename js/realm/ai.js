@@ -22,7 +22,7 @@ export const TUNING = {
   attackRatio: 1.4,        // our power / their defence needed to attack a house
   freeholdRatio: 1.3,      // ... a free hold
   followUp: 0.6,           // share of a queued attack's power assumed to wear the target down
-  seaLaneExtra: 0.4,       // extra margin to attack across a sea lane
+  seaLaneExtra: 0.15,      // extra margin to attack across a sea lane
   minMarchSoldiers: 100,   // a unit joins an attack only with this many soldiers
   minMarchTraining: 35,
   aggression: 0.6,         // chance per province per month to consider attacking a house

@@ -32,7 +32,9 @@ export function palette(color, accent) {
   if (p) return p;
   const [r, g, b] = hexToRgb(color);
   const lum = (r + g + b) / 3;
-  const base = lum < 70 ? shade(color, 0.3) : color;   // very dark banners read lighter on figures
+  // very dark banners (ravens) read as their colour mixed toward the accent, so they keep a hue
+  const [ar, ag, ab] = hexToRgb(accent);
+  const base = lum < 70 ? `#${[r * 0.55 + ar * 0.45, g * 0.55 + ag * 0.45, b * 0.55 + ab * 0.45].map(v => Math.round(v * 0.72).toString(16).padStart(2, '0')).join('')}` : color;
   p = {
     col: base, colD: shade(base.startsWith('#') ? base : color, -0.35), colL: shade(color, 0.25), acc: accent,
     ink: '#1b1418', skin: '#e2b98f', skinD: '#b8875e', steel: '#c7ccd4', steelD: '#7d8590',
@@ -213,8 +215,8 @@ function person(g, s, P, kit, pose, opts = {}) {
   g.fillStyle = P.skin; g.beginPath(); g.arc(hx, hy2, lw * 0.6, 0, TAU); g.fill();
   if (kit.weapon === 'bow' && opts._string) {   // string pulled to the back hand
     const bx = hx + Math.cos(ap.wa) * s * 0.02, by = hy2 + Math.sin(ap.wa) * s * 0.02;
-    const perp = ap.wa + Math.PI / 2, r = s * 0.24;
-    g.strokeStyle = 'rgba(240,235,215,0.9)'; g.lineWidth = Math.max(0.6, s * 0.012);
+    const perp = ap.wa + Math.PI / 2, r = s * 0.2;
+    g.strokeStyle = 'rgba(230,225,205,0.6)'; g.lineWidth = Math.max(0.6, s * 0.012);
     g.beginPath(); g.moveTo(bx + Math.cos(perp) * r, by + Math.sin(perp) * r);
     g.lineTo(opts._string.x, opts._string.y); g.lineTo(bx - Math.cos(perp) * r, by - Math.sin(perp) * r); g.stroke();
     if (act === 'draw') {   // nocked arrow
@@ -282,7 +284,7 @@ function drawWeapon(g, w, hx, hy, wa, s, P, act, k, ap, opts) {
       if (w === 'lance') { g.fillStyle = P.col; g.beginPath(); g.moveTo(tx - dx * s * 0.05, ty - dy * s * 0.05); g.lineTo(tx - dx * s * 0.2 - dy * s * 0.1, ty - dy * s * 0.2 + dx * s * 0.1); g.lineTo(tx - dx * s * 0.25, ty - dy * s * 0.25); g.fill(); }
     }
   } else if (w === 'bow') {
-    const perp = wa + Math.PI / 2, r = s * 0.24;
+    const perp = wa + Math.PI / 2, r = s * 0.2;
     g.strokeStyle = ink; g.lineWidth = Math.max(2, s * 0.045);
     const bend = (act === 'draw' ? 0.6 + 0.4 * ease(k) : 0.6) * s * 0.12;
     const p1 = { x: hx + Math.cos(perp) * r, y: hy + Math.sin(perp) * r }, p2 = { x: hx - Math.cos(perp) * r, y: hy - Math.sin(perp) * r };
