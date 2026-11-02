@@ -86,7 +86,7 @@ function castle(cx, cy, k, fill = '#2a2230') {
 }
 
 function portrait(s, w, h) {
-  const house = houseForPortrait(s.slot);
+  const house = houseForPortrait(s.slot) || { color: '#8a7a5a' };   // wanderers and heirs: neutral
   const ruler = s.slot <= 21;
   const c = house.color;
   return svg(w, h, `<defs>${grad('g', '#2b2433', '#0d0b10')}<radialGradient id="r" cx="0.5" cy="0.35" r="0.6"><stop offset="0" stop-color="${c}" stop-opacity="0.45"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></radialGradient></defs>
