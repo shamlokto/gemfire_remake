@@ -38,7 +38,7 @@ import { companyDiscount } from './economy.js';
 import { TECH_BY_ID, BRANCHES } from '../data/tech.js';
 import { landOf, yieldOf, applyBuild, cheapestBuild, aiBuild } from './landhooks.js';
 import { trade, tradeCap, tradeRoom } from './market.js';
-import { betaTopUp } from './state.js';
+import { betaTopUp, pruneVassals } from './state.js';
 
 export const DEVELOP_COST = 30;
 export const SPY_COST = 20;
@@ -215,6 +215,7 @@ export function assignLeader(state, pid, uid, vid) {
 export function applyOrder(state, order) {
   if (state.winner || state.defeated) return fail('The game is over.');
   betaTopUp(state);
+  pruneVassals(state);
   const pid = order.province ?? order.from;
   const pr = state.provinces[pid];
   if (!pr) return fail('No such province.');

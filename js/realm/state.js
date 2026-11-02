@@ -163,6 +163,19 @@ export function wanderersNear(state, pid) {
   return Object.values(state.vassals).filter(v => v.status === 'wandering' && near.has(v.location));
 }
 
+// Keep each province's vassal list honest: only active vassals who actually stand there. Captured,
+// fled, exiled or dead vassals (and anyone whose location moved) are dropped. Room checks
+// (MAX_VASSALS_PER_PROVINCE) count this list, so stale names would block marches and invitations.
+export function pruneVassals(state) {
+  for (const pr of state.provinces) {
+    const keep = pr.vassals.filter((id, i, a) => {
+      const v = state.vassals[id];
+      return v && v.status === 'active' && v.location === pr.id && a.indexOf(id) === i;
+    });
+    if (keep.length !== pr.vassals.length) pr.vassals = keep;
+  }
+}
+
 // ---------- RNG helper: use the state's rng and write it back ----------
 export function withRng(state, fn) {
   const rng = makeRng(state.rng);

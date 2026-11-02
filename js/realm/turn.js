@@ -28,7 +28,7 @@ import {
 // A vassal on the losing side with no surviving unit is captured with this chance.
 export const UNITLESS_CAPTURE = 0.4;
 import { applyOrder, resetOrders, moveVassal } from './orders.js';
-import { betaTopUp } from './state.js';
+import { betaTopUp, pruneVassals } from './state.js';
 import { monthlyTick, foodUpkeep } from './economy.js';
 import { marketTick, aiTrade, initMarket } from './market.js';
 import { maybeDawnwyrm, stripDragon } from './dragon.js';
@@ -356,6 +356,7 @@ function houseOrder(state) {
 export async function endMonth(state, opts = {}) {
   const summary = { battles: [], winner: null, defeated: false };
   if (state.winner || state.defeated) return summary;
+  pruneVassals(state);
   const order = houseOrder(state);
 
   // 1. AI orders
@@ -382,6 +383,7 @@ export async function endMonth(state, opts = {}) {
   state.marches = [];
 
   // 3. Economy, research, shard charge, characters
+  pruneVassals(state);
   withRng(state, rng => monthlyTick(state, rng));
   initMarket(state);
   withRng(state, rng => marketTick(state, rng));
