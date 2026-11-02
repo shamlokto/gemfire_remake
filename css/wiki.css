@@ -161,3 +161,28 @@ details.group .body { padding: 0 14px 14px; }
 .xtable i.dim { color: var(--w-muted); }
 .lq { font-family: var(--w-display); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; }
 .lq.q-breadbasket { color: #f2cf5b; } .lq.q-fertile { color: #9fd36a; } .lq.q-modest { color: #c9b98f; } .lq.q-barren { color: #c98a6a; }
+
+/* Painted section banners */
+.sec-banner { position: relative; margin: 44px 0 14px; border-radius: 10px; overflow: hidden; aspect-ratio: 16 / 4.2; min-height: 96px;
+  border: 1px solid var(--w-line); box-shadow: 0 10px 30px rgba(0,0,0,.45); background: var(--w-panel-2); }
+.sec-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.02); transition: transform 6s ease; }
+.sec-banner:hover img { transform: scale(1.08); }
+.sec-banner::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(10,8,6,.88) 0%, rgba(10,8,6,.55) 38%, rgba(10,8,6,.05) 75%),
+  linear-gradient(0deg, rgba(10,8,6,.55), transparent 55%); }
+.sec-banner h2 { position: absolute; left: 22px; bottom: 14px; z-index: 1; margin: 0; padding: 0; border: 0; font-size: 28px;
+  text-shadow: 0 2px 10px rgba(0,0,0,.9); }
+/* Card cover paintings */
+.card-cover { margin: -12px -12px 4px; height: 150px; overflow: hidden; border-radius: 8px 8px 0 0; position: relative; }
+.card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-cover::after { content: ''; position: absolute; inset: 0; background: linear-gradient(0deg, var(--w-panel), transparent 60%); }
+.house-card .card-cover { margin-top: -12px; }
+.spirit-card.has-cover { flex-wrap: wrap; }
+.spirit-card.has-cover .card-cover { flex: 1 0 100%; height: 170px; }
+.xtable .clash-thumb { width: 120px; aspect-ratio: 16 / 7; border-radius: 4px; }
+@media (max-width: 760px) {
+  .sec-banner { aspect-ratio: 16 / 6; }
+  .sec-banner h2 { font-size: 22px; left: 14px; bottom: 10px; }
+  .card-cover { height: 120px; }
+  .xtable .clash-thumb { width: 84px; }
+}
+.xtable .iso-thumb { width: 56px; height: 56px; background: transparent; border: 0; }

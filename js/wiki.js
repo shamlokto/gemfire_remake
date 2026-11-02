@@ -13,7 +13,7 @@ import { SPIRITS, SPIRIT_UNIT } from './data/spirits.js';
 import { RANDOM_EVENTS, STORY } from './data/events.js';
 import { TERRAIN, RESOURCE, BUILDING, PROJECT, Y as LY, potential } from './land/land.js';
 import { generateLand } from './land/landgen.js';
-import { SLOTS, loadArtManifest, art, hasArt, pad3, CREST, PROVINCE_VIGNETTE, CLASH_CUTIN, SPIRIT_CUTIN } from './data/art.js';
+import { SLOTS, loadArtManifest, art, hasArt, pad3, CREST, ENDING, PROVINCE_VIGNETTE, CLASH_CUTIN, SPIRIT_CUTIN, LAND_MOMENT, BATTLE_MOMENT2, HOUSE_CHARGE, LAND_BUILDING } from './data/art.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -34,7 +34,22 @@ function img(slot, { cls = '', style = '', alt = '', contain = false } = {}) {
 
 // ---------- table of contents ----------
 const TOC = [];
-const sec = (id, title, group) => { TOC.push({ id, title, group }); return `<h2 id="${id}">${esc(title)}</h2>`; };
+// Painted banner behind each section heading: the first installed slot in the list wins;
+// sections without art keep a plain heading.
+const BANNER = {
+  story: [99, 1], scenarios: [2, 1], turn: [4, 5], orders: [192, 2], economy: [313, 90], loyalty: [94, 93],
+  diplomacy: [96, 180], research: [2, 91], battle: [225, 345], damage: [345, 201], winning: [222, 221],
+  clashes: [205, 203], houses: [8, 185], characters: [186, 187], provinces: [317, 100], land: [317, 313],
+  troops: [346, 204], companies: [359, 207], militia: [213, 94], spirits: [353, 214], events: [90, 92],
+  'story-events': [97, 95], art: [1, 2],
+};
+const bannerSlot = id => (BANNER[id] || []).find(n => hasArt(n));
+const sec = (id, title, group) => {
+  TOC.push({ id, title, group });
+  const b = bannerSlot(id);
+  if (!b) return `<h2 id="${id}">${esc(title)}</h2>`;
+  return `<div class="sec-banner"><img src="${art(b)}" alt="" loading="lazy"><h2 id="${id}">${esc(title)}</h2></div>`;
+};
 
 function buildToc() {
   let html = '', opts = '', group = null;
@@ -83,6 +98,9 @@ function overview() {
   Isles, the Isle of Gulls, the Sunder Isles and Westreach are reached by a single sea lane or causeway each. Whoever
   holds the landing holds the island.</p>
   <p><b>Victory:</b> rule ${VICTORY_PROVINCES} of the ${PROVINCES.length} provinces, or hold all five shards. <b>Defeat:</b> lose your last province.</p>
+  <div class="prose-card"><p><b>Beta tester mode.</b> For a breezy first playthrough, switch on <i>Beta tester</i> on the scenario or house
+  screen (or in the in-game settings): your house gets unlimited gold, and unlimited food unless you turn it off, so you can muster, build, hire and
+  research freely while you learn the game. Rival houses play by the normal rules. A <i>Beta</i> badge shows in the top bar, and the setting is kept in your save.</p></div>
   <figure class="frame hero" data-slot="100" style="aspect-ratio:16/6"><img src="${art(100)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('broken')">
   <figcaption>${esc(STORY.ending.title)}</figcaption></figure>`;
 }
@@ -153,7 +171,7 @@ function battles() {
   <p>A battle is fought on a <b>16 × 12</b> grid drawn from the province's terrain: woods, hills, a river with a bridge,
   a road. The defender holds a 3 × 3 keep with a gate on the right; the attacker deploys on the left columns.</p>
   <p>Each side fields <b>${MAX_UNITS_PER_ARMY} troop units plus a 5th slot</b>. The 5th slot is the province's hired company,
-  or a <b>summoned spirit</b> if the house holds its shard, has not called it yet this season, and a vassal is present.
+  or a <b>summoned spirit</b> if the house holds its shard, the shard is <a href="#charge">fully charged</a>, and a vassal is present.
   A defender with more than ${MAX_UNITS_PER_ARMY} units fields its strongest ${MAX_UNITS_PER_ARMY}. Free holds defend with
   one to three bands of militia, with no leader.</p>
   <p><b>Leaders.</b> A unit led by a vassal adds the leader's Might to its blows and its defence, and Wits to its
@@ -192,7 +210,9 @@ function housesSec() {
     const st = HOUSE_START[h.id];
     const sp = h.shard ? SPIRITS[h.shard] : null;
     const count = VASSALS.filter(v => v.house === h.id).length;
+    const cover = [HOUSE_CHARGE[h.id], ENDING[h.id]].find(n => hasArt(n));
     return `<div class="card house-card" id="house-${h.id}" style="--hc:${h.color}">
+      ${cover ? `<div class="card-cover"><img src="${art(cover)}" alt="" loading="lazy"></div>` : ''}
       <header>${img(ruler.portrait, { style: 'width:96px;height:120px', alt: ruler.name })}
       <div style="flex:1;min-width:0"><h3><span class="swatch" style="background:${h.color}"></span>${esc(h.name)}</h3>
       <p class="motto">“${esc(h.motto)}”</p>
@@ -344,9 +364,15 @@ function bonusText(b) {
   return Object.entries(b).map(([k, v]) => `×${v} vs ${k}`).join(', ');
 }
 
+// Unit thumbnail: its clash painting when installed, else its sprite.
+function unitThumb(key, u) {
+  const c = CLASH_CUTIN[key];
+  return c && hasArt(c) ? img(c, { cls: 'clash-thumb', alt: u.name }) : img(u.sprite, { cls: 'sprite', contain: true, alt: u.name });
+}
+
 function troopsSec() {
   const trow = Object.entries(TROOPS).map(([k, t]) => `<tr>
-    <td>${img(t.sprite, { cls: 'sprite', contain: true, alt: t.name })}</td><td><b>${esc(t.name)}</b></td>
+    <td>${unitThumb(k, t)}</td><td><b>${esc(t.name)}</b></td>
     <td class="num">${t.atk}</td><td class="num">${t.def}</td><td class="num">${t.move}</td><td class="num">${t.range}</td>
     <td class="num">${t.cost}</td><td class="num">${t.upkeep}</td><td>${esc(bonusText(t.bonusVs))}</td><td>${esc(t.note)}</td></tr>`).join('');
   const crow = Object.entries(COMPANIES).map(([k, c]) => {
@@ -354,7 +380,7 @@ function troopsSec() {
       c.heals && `heals ${pct(c.heals)} of nearby troops per round`, c.requires && `needs ${TECH_BY_ID[c.requires].name}`,
       c.monster && 'monster (cheaper with Beast-Taming)', c.terrainBonus && Object.entries(c.terrainBonus).map(([t, m]) => `×${m} attack in ${t}`).join(', '),
       c.loyaltyHit && `loyalty −${c.loyaltyHit} when hired`, !c.wage && 'no wages'].filter(Boolean).join('; ');
-    return `<tr><td>${img(c.sprite, { cls: 'sprite', contain: true, alt: c.name })}</td><td><b>${esc(c.name)}</b></td>
+    return `<tr><td>${unitThumb(k, c)}</td><td><b>${esc(c.name)}</b></td>
     <td class="num">${c.atk}</td><td class="num">${c.def}</td><td class="num">${c.move}</td><td class="num">${c.range}</td>
     <td class="num">${c.size}</td><td class="num">${c.hire}</td><td class="num">${c.wage}</td><td>${esc(traits)}</td></tr>`;
   }).join('');
@@ -370,7 +396,7 @@ function troopsSec() {
   <div class="xwrap"><table class="xtable sortable"><thead><tr><th></th><th data-k="s">Company</th><th data-k="n">Atk</th><th data-k="n">Def</th><th data-k="n">Move</th>
   <th data-k="n">Range</th><th data-k="n">Size</th><th data-k="n">Hire</th><th data-k="n">Wage</th><th>Traits</th></tr></thead><tbody>${crow}</tbody></table></div>
   ${sec('militia', 'Militia', 'Armies')}
-  <div class="card" style="flex-direction:row;align-items:center;max-width:560px">${img(m.sprite, { style: 'width:72px;height:72px', contain: true, alt: 'Militia' })}
+  <div class="card" style="flex-direction:row;align-items:center;max-width:640px">${hasArt(CLASH_CUTIN.militia) ? img(CLASH_CUTIN.militia, { style: 'width:200px;aspect-ratio:16/7', alt: 'Militia' }) : img(m.sprite, { style: 'width:72px;height:72px', contain: true, alt: 'Militia' })}
   <p><b>${esc(m.name)}</b>: Atk ${m.atk}, Def ${m.def}, Move ${m.move}, melee. Peasants with pitchforks who defend the free
   holds, ${NEUTRAL_MILITIA.min}–${NEUTRAL_MILITIA.max} strong.</p></div>`;
 }
@@ -378,7 +404,9 @@ function troopsSec() {
 function spiritsSec() {
   const cards = Object.entries(SPIRITS).map(([k, s]) => {
     const holder = HOUSES.find(h => h.shard === k);
-    return `<div class="card spirit-card" id="spirit-${k}" style="--sc:${s.color}">
+    const cover = hasArt(SPIRIT_CUTIN[k]) ? SPIRIT_CUTIN[k] : null;
+    return `<div class="card spirit-card${cover ? ' has-cover' : ''}" id="spirit-${k}" style="--sc:${s.color}">
+      ${cover ? `<div class="card-cover"><img src="${art(cover)}" alt="" loading="lazy"></div>` : ''}
       ${img(s.art, { alt: s.name })}
       <div><h3>${esc(s.name)}</h3><p class="role">${esc(s.element)} · spell: <b>${esc(s.spell)}</b></p>
       <p>${esc(s.text)}</p>
@@ -426,14 +454,14 @@ function eventsSec() {
 
 // ---------- art gallery from docs/SHOTLIST.md ----------
 const KIND_LABEL = { title: 'Title', texture: 'Texture', season: 'Season banner', scene: 'Scene', map: 'World map', fog: 'Fog',
-  token: 'Map token', portrait: 'Portrait', cutin: 'Cut-in', ui: 'Battle UI', crest: 'Crest', backdrop: 'Backdrop', vignette: 'Vignette', spirit: 'Spirit', sprite: 'Sprite', terrain: 'Terrain tile', fx: 'Spell effect' };
+  token: 'Map token', portrait: 'Portrait', cutin: 'Cut-in', ui: 'Battle UI', crest: 'Crest', backdrop: 'Backdrop', vignette: 'Vignette', spirit: 'Spirit', sprite: 'Sprite', terrain: 'Terrain tile', fx: 'Effect', isosprite: 'Land sprite' };
 
 function parseShotlist(md) {
   const prompts = {}, sections = [];
   let cur = null;
   for (const raw of md.split('\n')) {
     const line = raw.trim();
-    const head = line.match(/^\*\*([A-Z])\. (.+?)\*\*\s*(.*)$/);
+    const head = line.match(/^\*\*([A-Z][0-9]?)\. (.+?)\*\*\s*(.*)$/);
     if (head) { cur = { letter: head[1], title: head[2], note: head[3].replace(/^[—:-]\s*/, ''), slots: [] }; sections.push(cur); continue; }
     if (!cur || !/^\d/.test(line)) continue;
     const range = line.match(/^(\d+)[–-](\d+)\s+([^:]+):\s*(.+)$/);
@@ -514,7 +542,7 @@ function landSec() {
   }).sort((a, b) => b.food - a.food);
   const q = f => (f >= 900 ? 'breadbasket' : f >= 500 ? 'fertile' : f >= 250 ? 'modest' : 'barren');
   const soils = TERRAIN.map(t => `<tr><td>${esc(t.name)}</td><td class="num">${t.soil ? '×' + t.soil : '—'}</td></tr>`).join('');
-  const blds = BUILDING.filter(b => b.key !== 'none').map(b => `<tr><td><b>${esc(b.name)}</b></td><td class="num">${b.cost || '—'}</td><td class="num">${b.time || '—'}</td><td class="num">${b.labour || 0}</td><td>${esc(b.text)}</td></tr>`).join('');
+  const blds = BUILDING.filter(b => b.key !== 'none').map(b => `<tr><td>${LAND_BUILDING[b.key] && hasArt(LAND_BUILDING[b.key]) ? img(LAND_BUILDING[b.key], { cls: 'iso-thumb', contain: true, alt: b.name }) : ''}</td><td><b>${esc(b.name)}</b></td><td class="num">${b.cost || '—'}</td><td class="num">${b.time || '—'}</td><td class="num">${b.labour || 0}</td><td>${esc(b.text)}</td></tr>`).join('');
   const projs = Object.values(PROJECT).map(pr => `<tr><td><b>${esc(pr.name)}</b></td><td class="num">${pr.cost}</td><td class="num">${pr.time}</td><td>${esc(pr.text)}</td></tr>`).join('');
   const res = RESOURCE.filter(r => r.key !== 'none').map(r => `<li><b>${esc(r.name)}</b>: ${esc(r.text)}</li>`).join('');
   const rows = pots.map(({ p, food, gold }) => `<tr><td><a href="#prov-${p.id}">${esc(p.name)}</a></td><td>${p.terrain}</td><td class="num">${food}</td><td class="num">${gold}</td><td><span class="lq q-${q(food)}">${q(food)}</span></td></tr>`).join('');
@@ -531,7 +559,7 @@ function landSec() {
     <li><b>War scars the land.</b> When a province falls, the fighting damages buildings (sieges worse; farms burn first), and the conqueror may <b>loot</b> it: gold at once, but markets, houses and granaries are wrecked and loyalty falls by 25. Damaged buildings produce nothing until repaired.</li>
   </ul>
   <div class="xwrap"><table class="xtable"><tr><th>Soil</th><th>Farm ×</th></tr>${soils}</table></div>
-  <div class="xwrap"><table class="xtable"><tr><th>Building</th><th>Gold</th><th>Months</th><th>Hands</th><th>Effect</th></tr>${blds}</table></div>
+  <div class="xwrap"><table class="xtable"><tr><th></th><th>Building</th><th>Gold</th><th>Months</th><th>Hands</th><th>Effect</th></tr>${blds}</table></div>
   <div class="xwrap"><table class="xtable"><tr><th>Project</th><th>Gold</th><th>Months</th><th>Effect</th></tr>${projs}</table></div>
   <p><b>Special resources</b></p><ul>${res}</ul>
   <h3 style="margin-top:14px">Breadbaskets and barren land</h3>
