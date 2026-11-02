@@ -1,0 +1,56 @@
+/* Province land view (js/ui/landview.js). Uses the game's theme tokens with fallbacks. */
+.lv-root {
+  --lv-bg: var(--bg, #14110d); --lv-panel: var(--panel, #1f1a14); --lv-panel-2: var(--panel-2, #2a2319);
+  --lv-text: var(--text, #efe4cc); --lv-muted: var(--muted, #a99a7c); --lv-accent: var(--accent, #d9a94a);
+  --lv-line: var(--line, #3d3326);
+  position: relative; display: flex; flex-direction: column; height: 100%; min-height: 320px;
+  background: var(--lv-bg); color: var(--lv-text); font-family: var(--font-body, 'EB Garamond', Georgia, serif);
+  border: 1px solid var(--lv-line); border-radius: 8px; overflow: hidden;
+}
+.lv-hud { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 12px;
+  background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.15)); border-bottom: 1px solid var(--lv-line); }
+.lv-title { font-family: var(--font-display, 'Cinzel', Georgia, serif); letter-spacing: .05em; }
+.lv-title b { color: var(--lv-accent); font-size: 17px; }
+.lv-season { color: var(--lv-muted); font-size: 14px; }
+.lv-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; flex: 1; }
+.lv-stat { display: inline-flex; align-items: baseline; gap: 5px; font-size: 14px; }
+.lv-stat i { font-style: normal; color: var(--lv-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.lv-stat b { color: var(--lv-text); }
+.lv-stat em { color: var(--lv-muted); font-size: 12px; }
+.lv-tools { display: flex; gap: 6px; }
+.lv-btn { font: inherit; font-size: 13px; color: var(--lv-text); background: var(--lv-panel-2); border: 1px solid var(--lv-line);
+  border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.lv-btn:hover, .lv-btn.on { border-color: var(--lv-accent); color: var(--lv-accent); }
+.lv-warn:hover { border-color: #d9614a; color: #f08a74; }
+.lv-stage { position: relative; flex: 1; min-height: 240px; }
+.lv-canvas { display: block; touch-action: manipulation; cursor: pointer; }
+.lv-tip { position: absolute; pointer-events: none; max-width: 220px; background: rgba(20,16,11,.94); border: 1px solid var(--lv-line);
+  border-radius: 6px; padding: 6px 9px; font-size: 13px; line-height: 1.35; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.lv-res { color: #c9a0ff; }
+.lv-bad { color: #f08a74; }
+.lv-dim { color: var(--lv-muted); }
+.lv-flash { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); background: rgba(20,16,11,.92);
+  border: 1px solid var(--lv-accent); color: var(--lv-text); border-radius: 6px; padding: 5px 12px; font-size: 14px; }
+.lv-palette { position: absolute; right: 10px; top: 54px; width: 300px; max-height: calc(100% - 64px); overflow: auto;
+  background: rgba(24,19,13,.97); border: 1px solid var(--lv-line); border-radius: 8px; padding: 10px; font-size: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.lv-pal-head { display: flex; gap: 8px; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; line-height: 1.35; }
+.lv-pal-row { display: flex; gap: 6px; margin: 6px 0; }
+.lv-pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lv-opt { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto auto; gap: 0 6px; text-align: left; font: inherit;
+  color: var(--lv-text); background: var(--lv-panel-2); border: 1px solid var(--lv-line); border-radius: 6px; padding: 6px; cursor: pointer; }
+.lv-opt:hover { border-color: var(--lv-accent); }
+.lv-ico { grid-row: 1 / 4; font-size: 17px; }
+.lv-opt-name { font-family: var(--font-display, 'Cinzel', Georgia, serif); font-size: 12.5px; letter-spacing: .03em; color: var(--lv-accent); }
+.lv-opt-cost { font-size: 12px; color: var(--lv-muted); }
+.lv-opt-prev { font-size: 12px; color: #a8d98a; }
+.lv-why { margin-top: 8px; color: var(--lv-muted); font-size: 12.5px; }
+.lv-why summary { cursor: pointer; }
+@media (max-width: 640px) {
+  .lv-palette { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 55%; }
+  .lv-hud { padding: 6px 10px; }
+  .lv-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 8px; flex-basis: 100%; order: 3; }
+  .lv-stat { flex-direction: column; gap: 0; font-size: 13px; }
+  .lv-stat i { font-size: 10px; }
+  .lv-stat em { display: none; }
+}
