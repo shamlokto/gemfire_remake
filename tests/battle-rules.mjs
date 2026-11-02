@@ -4,7 +4,7 @@ import {
   createBattle, applyAction, legalMoves, legalTargets, expectedKills, result, unitAt, getUnit,
   OBJ, W, H, ROUT_FRACTION, ROUT_LEADERLESS, MAX_ROUNDS, spellCells, canCast, routAt, statsOf, weatherFor, moveRange, attackRange, terrainAt,
 } from '../js/battle/rules.js';
-import { generateMap, generateField, TERRAIN, biomeOf } from '../js/battle/mapgen.js';
+import { generateMap, generateField, TERRAIN, biomeOf, pathExists, TEMPLATES } from '../js/battle/mapgen.js';
 import { breathCells, canBreathe, elevAt, slopeBonus, moveCost, DAWNWYRM } from '../js/battle/rules.js';
 import { runToEnd, autoResolve } from '../js/battle/auto.js';
 
@@ -19,6 +19,7 @@ const input = (a, d, extra = {}) => ({ provinceId: 0, terrain: 'plains', siege: 
 function sandbox(a, d, extra) {
   const b = createBattle(input(a, d, extra), 1);
   b.grid = b.grid.map(() => 'grass');
+  b.obj = { ...OBJ }; b.gate = { x: OBJ.x - 1, y: OBJ.y };
   b.grid[OBJ.y * W + OBJ.x] = 'keep';
   b.elev = b.elev.map(() => 0);
   return b;
@@ -26,12 +27,35 @@ function sandbox(a, d, extra) {
 const place = (b, id, x, y) => { const u = getUnit(b, id); u.x = x; u.y = y; return u; };
 
 // Maps: every terrain/seed has a reachable keep and passable deployment.
-for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for (let s = 1; s <= 30; s++) {
-  const g = generateMap(t, s, true);
+for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for (let s = 1; s <= 30; s++) for (const siege of [true, false]) {
+  const f = generateField(t, s, siege, { provinceId: [9, 7, 11, 5, 16, 22][['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast'].indexOf(t)], season: s % 4 });
+  const g = f.grid;
   ok(g.length === W * H, 'grid size');
-  ok(g[OBJ.y * W + OBJ.x] === 'keep', 'keep at objective');
-  ok(g[5 * W + 12] === 'gate', 'gate in siege');
+  ok(f.obj.x >= 10 && f.obj.x <= 13 && f.obj.y >= 2 && f.obj.y <= 9, 'objective on the east half ' + JSON.stringify(f.obj));
+  ok(g[f.obj.y * W + f.obj.x] === 'keep', 'keep at objective');
+  if (siege) ok(f.gate && g[f.gate.y * W + f.gate.x] === 'gate' && f.gate.x <= f.obj.x && Math.abs(f.gate.x - f.obj.x) + Math.abs(f.gate.y - f.obj.y) === 1, 'gate next to the keep, not facing away ' + t + ' ' + s);
+  ok(pathExists(g, f.obj), 'path from the west to the objective ' + t + ' ' + s + ' ' + f.template + ' ' + f.castle);
   ok([0, 1, 2].every(x => [...Array(H).keys()].every(y => !['mountain', 'water', 'lava'].includes(g[y * W + x]))), 'deploy zone clear ' + t);
+  ok(JSON.stringify(generateField(t, s, siege, { provinceId: [9, 7, 11, 5, 16, 22][['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast'].indexOf(t)], season: s % 4 })) === JSON.stringify(f), 'same seed, same map');
+}
+
+// Variety: across 20 seeds in one province, maps differ a lot and the castle moves.
+{
+  const CH = { grass: '.', road: '=', forest: 'T', hills: '^', water: '~', bridge: '#', marsh: ',', wall: 'W', gate: 'G', keep: 'K', farmland: 'f',
+    village: 'v', mountain: 'M', tents: 't', palisade: '|', cliffs: 'C', sand: 's', snow: '*', ice: 'i', ruins: 'r', lava: 'L', ash: 'a' };
+  const fs = [...Array(20).keys()].map(k => generateField('plains', k + 1, k % 3 !== 2, { provinceId: 9, season: 1 }));
+  let tot = 0, n = 0;
+  for (let i = 0; i < fs.length; i++) for (let j = i + 1; j < fs.length; j++) { tot += fs[i].grid.filter((t, q) => t !== fs[j].grid[q]).length; n++; }
+  const avg = tot / n;
+  const objs = new Set(fs.map(f => f.obj.x + ',' + f.obj.y));
+  const tpls = new Set(fs.map(f => f.template)), castles = new Set(fs.filter(f => f.castle).map(f => f.castle));
+  ok(avg > 90, 'maps differ: average ' + avg.toFixed(1) + ' of 192 tiles');
+  ok(objs.size >= 5, 'objective positions vary: ' + objs.size);
+  console.log(`map variety: ${avg.toFixed(1)} of 192 tiles differ on average; ${objs.size} objective positions; templates ${[...tpls].join(', ')}; castles ${[...castles].join(', ')}`);
+  for (const f of fs.slice(0, 6)) {
+    console.log(`  ${f.template} / ${f.castle || f.camp}  obj ${f.obj.x},${f.obj.y}`);
+    for (let y = 0; y < H; y++) console.log('    ' + f.grid.slice(y * W, y * W + W).map(t => CH[t] || '?').join(''));
+  }
 }
 
 // Biomes and new terrains (v3 isometric board).
@@ -266,10 +290,11 @@ for (const t of ['plains', 'forest', 'hills', 'mountain', 'marsh', 'coast']) for
 // Gate breach event.
 {
   const b = createBattle(input([U('a', 'footmen', 200)], [U('d', 'archers', 200)]), 2);
-  b.units.find(u => u.id === 'd').x = 15; b.units.find(u => u.id === 'd').y = 0;
-  const a = getUnit(b, 'a'); a.x = 11; a.y = 5;
-  b.grid[5 * W + 11] = 'road';
-  const r = applyAction(b, { type: 'move', unit: 'a', to: { x: 12, y: 5 } });
+  const gt = b.gate, fx = gt.x + (gt.x - b.obj.x), fy = gt.y + (gt.y - b.obj.y);
+  const dU = b.units.find(u => u.id === 'd'); dU.x = 15; dU.y = gt.y < 6 ? 11 : 0;
+  const a = getUnit(b, 'a'); a.x = fx; a.y = fy;
+  b.grid[fy * W + fx] = 'road';
+  const r = applyAction(b, { type: 'move', unit: 'a', to: { x: gt.x, y: gt.y } });
   ok(r.ok && r.events.some(e => e.t === 'gate') && b.gateBreached, 'gate breach event');
 }
 

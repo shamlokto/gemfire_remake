@@ -12,7 +12,7 @@
 
 import {
   createBattle, applyAction, legalMoves, legalTargets, result, getUnit, unitAt, liveUnits,
-  spellCells, canCast, spiritOf, routAt, sideDone, statsOf, terrainAt, enemyOf, W, H, OBJ, TERRAIN, MAX_ROUNDS,
+  spellCells, canCast, spiritOf, routAt, sideDone, statsOf, terrainAt, enemyOf, W, H, OBJ, objOf, gateOf, TERRAIN, MAX_ROUNDS,
   moveRange, attackRange, expectedKills, DIR_NAMES, breathCells, canBreathe, dragonOf, DAWNWYRM,
 } from '../battle/rules.js';
 import { chooseAction } from '../battle/ai.js';
@@ -478,7 +478,8 @@ export async function runBattle(container, input, opts = {}) {
   // block when the selected unit can reach it), and a KEEP marker on the objective square.
   function drawObjectiveMarkers() {
     const { cs } = view;
-    const gi = b.grid.indexOf('gate');
+    const OBJ = objOf(b);
+    const gt = gateOf(b), gi = gt && b.grid[gt.y * W + gt.x] === 'gate' ? gt.y * W + gt.x : b.grid.indexOf('gate');
     const pul = 0.5 + 0.5 * Math.sin(view.now / 220);
     const label = (x, y, text, col, lift, dx = 0) => {
       const p0 = px(x, y), p = { x: p0.x + cs * dx, y: p0.y };
@@ -512,7 +513,7 @@ export async function runBattle(container, input, opts = {}) {
   function drawOverlays() {
     const { cs } = view;
     // objective glow
-    diamondFill(OBJ.x, OBJ.y, null, `rgba(255,215,120,${0.45 + 0.3 * Math.sin(view.now / 300)})`, 0.1);
+    diamondFill(objOf(b).x, objOf(b).y, null, `rgba(255,215,120,${0.45 + 0.3 * Math.sin(view.now / 300)})`, 0.1);
     const sel = view.sel && getUnit(b, view.sel);
     if (view.mode === 'spell' && view.spellAt) {
       const side = b.side, sp = SPIRITS[b.spirit[side]];
@@ -1883,7 +1884,7 @@ export async function runBattle(container, input, opts = {}) {
     view.mode = view.mode === 'spell' ? 'idle' : 'spell';
     view.spellDir = b.side === 'attacker' ? 'right' : 'left';
     if (SPIRITS[b.spirit[b.side]].shape === 'wall') view.spellDir = 'down';
-    view.spellAt = SPIRITS[b.spirit[b.side]].shape === 'targets' ? { x: OBJ.x, y: OBJ.y } : null;
+    view.spellAt = SPIRITS[b.spirit[b.side]].shape === 'targets' ? { ...objOf(b) } : null;
     updateHud();
   });
   $('.bt-retreat').addEventListener('click', () => {

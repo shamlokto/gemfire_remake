@@ -6,7 +6,7 @@
 // objective (attackers push for the keep, defenders hold the walls and the keep square).
 
 import {
-  W, OBJ, statsOf, reachable, elevAt, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
+  W, objOf, statsOf, reachable, elevAt, legalTargets, expectedKills, terrainDef, liveUnits, enemyOf,
   dist, getUnit, canCast, spellCells, canBreathe, breathCells, dragonOf, DAWNWYRM, unitAt, routAt, MAX_ROUNDS, DIR_NAMES, terrainAt,
   moveRange, attackRange,
 } from './rules.js';
@@ -24,7 +24,7 @@ function attackScore(b, u, t, from) {
     const c = expectedKills(b, { ...t, soldiers: left }, { ...u, x: from.x, y: from.y }, 0.5, from);
     s -= c * value(u) * 0.8;
   }
-  if (t.x === OBJ.x && t.y === OBJ.y) s *= 1.3;
+  if (t.x === objOf(b).x && t.y === objOf(b).y) s *= 1.3;
   return s;
 }
 
@@ -113,13 +113,13 @@ function cellScore(b, u, x, y, foes, side) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (terrainAt(b, x + dx, y + dy) === 'lava') { s -= 18; break; }
   }
   if (side === 'attacker') {
-    const dObj = dist(at, OBJ);
+    const dObj = dist(at, objOf(b));
     s -= dObj * (ranged ? 2 : 4) * (1 + b.round / MAX_ROUNDS);
-    if (x === OBJ.x && y === OBJ.y) s += 120;
+    if (x === objOf(b).x && y === objOf(b).y) s += 120;
   } else {
     const t = terrainAt(b, x, y);
     if (t === 'keep') s += 70; else if (t === 'gate') s += 30; else if (t === 'wall') s += 25;
-    s -= dist(at, OBJ) * 3;
+    s -= dist(at, objOf(b)) * 3;
   }
   // Threat: enemy melee that can reach us next round.
   let nearestFoe = Infinity, threat = 0;
@@ -160,7 +160,7 @@ function planUnit(b, u) {
     if (bt && !adjacentThreat) return { type: 'attack', unit: u.id, target: bt.target.id };
   }
   // Defender holding the keep square never leaves it; it strikes adjacent foes.
-  if (side === 'defender' && u.x === OBJ.x && u.y === OBJ.y) {
+  if (side === 'defender' && u.x === objOf(b).x && u.y === objOf(b).y) {
     const bt = bestTarget(b, u);
     return bt ? { type: 'attack', unit: u.id, target: bt.target.id } : { type: 'wait', unit: u.id };
   }

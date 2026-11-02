@@ -19,6 +19,9 @@ import { makeRng } from '../rng.js';
 import { W, H, OBJ, TERRAIN, generateField, idx, IMPASSABLE } from './mapgen.js';
 
 export { W, H, OBJ, TERRAIN };
+// The objective square of a battle (varies per map; OBJ is the default for old saved battles).
+export const objOf = b => b.obj || OBJ;
+export const gateOf = b => b.gate || (b.siege ? { x: OBJ.x - 1, y: OBJ.y } : null);
 // Elevation (0-3) of a square; old saved battles have none (flat).
 export { DAWNWYRM };
 export const elevAt = (b, x, y) => (b.elev ? b.elev[idx(x, y)] || 0 : 0);
@@ -73,7 +76,8 @@ export function createBattle(input, seed = 1) {
   const b = {
     v: 2, seed, rng: (seed * 2654435761) >>> 0,
     provinceId: input.provinceId ?? null, terrain: input.terrain || 'plains', siege,
-    grid, elev: field.elev, biome: field.biome, round: 1, side: 'attacker', winner: null, reason: null,
+    grid, elev: field.elev, biome: field.biome, obj: field.obj, gate: field.gate,
+    template: field.template, castle: field.castle || null, camp: field.camp || null, round: 1, side: 'attacker', winner: null, reason: null,
     season: input.season ?? null,
     weather: input.weather !== undefined ? input.weather : weatherFor(input.season, input.terrain || 'plains'),
     gateBreached: false,
@@ -123,6 +127,7 @@ export function createBattle(input, seed = 1) {
 }
 
 function deploy(b, att, def) {
+  const OBJ = objOf(b);
   const taken = new Set();
   const free = (x, y) => x >= 0 && y >= 0 && x < W && y < H && !taken.has(idx(x, y)) &&
     !IMPASSABLE.has(b.grid[idx(x, y)]) && b.grid[idx(x, y)] !== 'water';
@@ -140,14 +145,14 @@ function deploy(b, att, def) {
   }
 
   // Defenders: melee on the keep and gate, ranged on walls, the rest around the keep.
-  const core = [{ x: OBJ.x, y: OBJ.y }, { x: OBJ.x - 1, y: OBJ.y }];
+  const core = [{ x: OBJ.x, y: OBJ.y }, gateOf(b) || { x: OBJ.x - 1, y: OBJ.y }];
   const ring = [];
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     const s = { x: OBJ.x + dx, y: OBJ.y + dy };
     if (!core.some(c => c.x === s.x && c.y === s.y)) ring.push(s);
   }
   const outer = [];
-  for (let y = 0; y < H; y++) for (let x = 10; x < W; x++) outer.push({ x, y });
+  for (let y = 0; y < H; y++) for (let x = Math.max(6, OBJ.x - 4); x < W; x++) outer.push({ x, y });
   outer.sort((p, q) => (Math.abs(p.x - OBJ.x) + Math.abs(p.y - OBJ.y)) - (Math.abs(q.x - OBJ.x) + Math.abs(q.y - OBJ.y)));
   const melee = def.filter(u => statsOf(u.type).range === 1).sort((p, q) => q.soldiers * statsOf(q.type).def - p.soldiers * statsOf(p.type).def);
   const ranged = def.filter(u => statsOf(u.type).range > 1).sort((p, q) => q.soldiers - p.soldiers);
@@ -376,6 +381,7 @@ function beginSide(b, side, events) {
 
 function endRound(b, events) {
   // Keep capture: an attacker on the objective square at the end of a full round wins.
+  const OBJ = objOf(b);
   const holder = unitAt(b, OBJ.x, OBJ.y);
   if (holder && holder.side === 'attacker') { finish(b, 'attacker', 'keep taken', events); return; }
   b.tempWalls = b.tempWalls.filter(w => w.until > b.round);
@@ -480,7 +486,7 @@ export function canCast(b, side) {
 function castSpell(b, side, target, dir, events) {
   const spiritId = b.spirit[side];
   const sp = SPIRITS[spiritId];
-  const cells = spellCells(b, side, target || { x: OBJ.x, y: OBJ.y }, dir);
+  const cells = spellCells(b, side, target || { ...objOf(b) }, dir);
   const hits = [];
   b.spiritUsed[side] = true;
   addLog(b, `The ${sp.name} answers: ${sp.spell}!`);
