@@ -109,7 +109,7 @@ export function listOrders(state, pid) {
 
   if (landOf(state, pid)) {
     const c = cheapestBuild(state, pid);
-    add('build', c, done || (pr.gold < Math.min(c, 30) ? `Needs ${Math.min(c, 30)} gold.` : null));
+    add('build', c, pr.gold < Math.min(c, 30) ? `Needs ${Math.min(c, 30)} gold.` : null);   // free action: never 'done'
   } else {
     add('develop', DEVELOP_COST, done || (pr.gold < DEVELOP_COST ? `Needs ${DEVELOP_COST} gold.` : null));
   }
@@ -219,6 +219,15 @@ export function applyOrder(state, order) {
   if (!house) return fail('Not your province.');
   if (order.house && order.house !== house) return fail('Not your province.');
   if (order.type === 'assign') return assignLeader(state, pid, order.unit, order.vassal ?? null);
+  // Building on the land is a free action: as many buildings, projects and repairs a month as the
+  // province can pay for. It does not use the province's monthly order.
+  if (order.type === 'build') { const r = applyBuild(state, pid, order); betaTopUp(state); return r; }
+  // Inviting wanderers is free too: invite as many as you can afford (and have room for) each month.
+  if (order.type === 'diplomacy' && order.kind === 'wanderer') {
+    if (!provinceVassals(state, pid).length) return fail('Needs a vassal in the province.');
+    const r = HANDLERS.diplomacy(state, pr, house, order);
+    betaTopUp(state); return r;
+  }
   if (pr.ordered) return fail('This province has already acted this month.');
   const vs = provinceVassals(state, pid);
   const needV = ['diplomacy', 'spy', 'recruit'].includes(order.type);

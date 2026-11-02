@@ -12,7 +12,7 @@
 // buildBattleInput. Defenders beyond the 4 fielded units fall back with the vassals if the
 // province falls.
 
-import { yieldOf, warDamage, applyLoot, landQuality } from './landhooks.js';
+import { yieldOf, warDamage, applyLoot, landQuality, aiBuild } from './landhooks.js';
 import { STORY } from '../data/events.js';
 import { HOUSES } from '../data/houses.js';
 import { SPIRIT_IDS, SPIRIT_UNIT } from '../data/spirits.js';
@@ -361,6 +361,7 @@ export async function endMonth(state, opts = {}) {
     if (!state.houses[h].alive || isPlayerControlled(state, h)) continue;
     const orders = withRng(state, rng => planHouseOrders(state, h, rng));
     for (const o of orders) applyOrder(state, o);
+    aiExtraBuilds(state, h);
   }
 
   // 2. Marches, in rotating house order
@@ -469,4 +470,20 @@ export function checkVictory(state) {
     state.pendingEvents.push({ art: STORY.victory.art, title: STORY.victory.title, text, winner });
   }
   return winner;
+}
+
+// Building is a free action, so AI houses also build more than once a month while the treasury
+// allows: up to AI_EXTRA_BUILDS more per province, keeping a reserve for troops and wages.
+const AI_EXTRA_BUILDS = 2, AI_BUILD_RESERVE = 80;
+const AI_GOAL = { aldmere: 'food', isolde: 'gold', corvane: 'gold', hrothgar: 'balanced', seraphine: 'loyalty', vey: 'food' };
+function aiExtraBuilds(state, house) {
+  for (const pr of state.provinces) {
+    if (pr.owner !== house) continue;
+    for (let k = 0; k < AI_EXTRA_BUILDS; k++) {
+      if (pr.gold < AI_BUILD_RESERVE + 20) break;
+      const goal = pr.loyalty < 50 ? 'loyalty' : (AI_GOAL[house] || 'balanced');
+      const o = aiBuild(state, pr.id, goal, AI_BUILD_RESERVE);
+      if (!o || !applyOrder(state, o).ok) break;
+    }
+  }
 }

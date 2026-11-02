@@ -8,7 +8,7 @@
 import {
   provinceYield, legacyStats, build as landBuild, repair as landRepair, demolish as landDemolish,
   startProject, damage as landDamage, loot as landLoot, suggestBuild, potential, buildCost,
-  listBuildable, PROJECT, B, T, BUILD_KEYS,
+  listBuildable, PROJECT, B, T, BUILD_KEYS, BUILDING as BUILDING_DEFS,
 } from '../land/land.js';
 import { generateAllLand } from '../land/landgen.js';
 import { techEffect, hasTech } from './tech.js';
@@ -121,6 +121,7 @@ export function applyBuild(state, pid, o) {
   }
   const land = landOf(state, pid);
   if (!land) return { ok: false, msg: 'This province has no land map.' };
+  if (o.kind === 'repairAll') return repairAll(state, pid);
   const x = o.x | 0, y = o.y | 0;
   const ctx = landCtx(state, pid);
   let r;
@@ -135,6 +136,28 @@ export function applyBuild(state, pid, o) {
   syncLegacy(state, pid);
   return { ok: true, cost, msg: r.msg };
 }
+
+// Repair every damaged building the province can pay for (cheapest first). Each repair takes a month.
+export function repairAll(state, pid) {
+  const land = landOf(state, pid), pr = state.provinces[pid];
+  const dmg = [];
+  for (let i = 0; i < land.d.length; i++) if (land.d[i] && land.b[i]) dmg.push(i);
+  if (!dmg.length) return { ok: false, msg: 'Nothing here needs repair.' };
+  dmg.sort((a, b) => repairCostAt(land, a) - repairCostAt(land, b));
+  let n = 0, spent = 0;
+  for (const i of dmg) {
+    const c = repairCostAt(land, i);
+    if (c > pr.gold) break;
+    const r = landRepair(land, i % land.w, (i / land.w) | 0, { gold: pr.gold });
+    if (!r.ok) continue;
+    pr.gold -= r.cost; spent += r.cost; n++;
+  }
+  syncLegacy(state, pid);
+  if (!n) return { ok: false, msg: `Not enough gold (the cheapest repair costs ${repairCostAt(land, dmg[0])}).` };
+  return { ok: true, cost: spent, count: n, msg: `${n} building${n > 1 ? 's' : ''} under repair for ${spent} gold${n < dmg.length ? ` (${dmg.length - n} left: not enough gold)` : ''}.` };
+}
+export const repairCostAt = (land, i) => Math.round((BUILDING_DEFS[land.b[i]]?.cost || 0) * 0.5);
+export const damagedCount = (state, pid) => { const l = landOf(state, pid); return l ? l.d.filter((d, i) => d && l.b[i]).length : 0; };
 
 // The cheapest thing the province could build now (for listOrders' cost / disabled reason).
 export function cheapestBuild(state, pid) {

@@ -18,7 +18,7 @@ import {
 import { TECHS, TECH_BY_ID, BRANCHES, BRANCH_IDS, techsOf } from '../data/tech.js';
 import { listOrders, musterCost, musterLimit, developGain, trainGain, recruitChance, DEVELOP_COST, FEAST_FOOD, SPY_COST, MAX_MARCH, adjacentOwn, marchOptions, musterOptions, hireOptions } from '../realm/orders.js';
 import { forecast } from '../realm/economy.js';
-import { landOf, yieldOf, landQuality, landPotential, landCtx } from '../realm/landhooks.js';
+import { landOf, yieldOf, landQuality, landPotential, landCtx, damagedCount } from '../realm/landhooks.js';
 import { openLandView } from './landview.js';
 import { DIPLOMACY, bribeCost, truceChance, marriageChance, tributeChance, bribeChance, wandererChance } from '../realm/diplomacy.js';
 import { h, portrait, crestImg, houseColor, fmt } from './portraits.js';
@@ -226,14 +226,25 @@ export class RealmUI {
     frag.append(h('div.section-title', `Vassals ${vs.length}/${MAX_VASSALS_PER_PROVINCE}`));
     if (!vs.length) frag.append(h('p.hint', pr.owner ? 'No vassal is stationed here. Units can hold the province, but only a vassal can lead an attack.' : 'No lord rules this free hold.'));
     for (const v of vs) frag.append(vassalRow(st, v, pr.units.find(u => u.leader === v.id)));
-    const wand = wanderersAt(st, pid);
+    // Wanderers here (and, for your own provinces with a vassal, next door): invite each with one
+    // click. Inviting is free of the month's order, so you can recruit several a month.
+    const mineV = pr.owner === st.player && vs.length;
+    const wand = mineV ? wanderersNear(st, pid) : wanderersAt(st, pid);
     if (wand.length) {
+      const envoy = mineV ? envoyOf(st, pid) : null;
       frag.append(h('div.section-title', `Wanderers ${wand.length}`));
-      frag.append(h('p.hint', 'Free swords with no house. Invite them by Diplomacy from this province or a neighbour; some offer their service to whoever takes the province they are in.'));
-      for (const w of wand) frag.append(h('div.vassal', portrait(w.id, { size: 44 }),
-        h('div', h('div.nm', VASSAL_BY_ID[w.id].name, h('span.wanderer-tag', 'wanderer')), h('div.ti', VASSAL_BY_ID[w.id].title),
-          h('div.mini', h('span', 'Might ', h('b', w.might)), h('span', 'Wits ', h('b', w.wits)), h('span', 'Charm ', h('b', w.charm)),
-            w.band ? h('span', `${w.band} ${TROOPS[w.troop]?.name.toLowerCase() || ''}`) : null))));
+      frag.append(h('p.hint', mineV ? `Free swords here or next door. Invite as many as you like each month (${DIPLOMACY.wanderer.cost} gold in gifts each; the envoy's Charm decides; refusals make the next offer likelier).`
+        : 'Free swords with no house. Invite them from a province of yours with a vassal, here or next door; some offer their service to whoever takes the province they are in.'));
+      for (const w of wand) {
+        const full = pr.vassals.length >= MAX_VASSALS_PER_PROVINCE;
+        const btn = mineV ? h('button.btn.small', { disabled: full, title: full ? 'No room for another vassal here.' : `Chance ${pct(wandererChance(st, st.player, envoy, w))}`,
+          onclick: () => { sfx('click'); const r = this.app.apply({ type: 'diplomacy', province: pid, kind: 'wanderer', vassal: w.id }); if (r && r.msg) toast?.(r.msg); this.app.refresh(); } },
+          full ? 'No room' : `Invite · ${pct(wandererChance(st, st.player, envoy, w))}`) : null;
+        frag.append(h('div.vassal', portrait(w.id, { size: 44 }),
+          h('div', h('div.nm', VASSAL_BY_ID[w.id].name, h('span.wanderer-tag', 'wanderer'), w.location !== pid ? h('span.mini', ` · in ${PROVINCES[w.location].name}`) : null), h('div.ti', VASSAL_BY_ID[w.id].title),
+            h('div.mini', h('span', 'Might ', h('b', w.might)), h('span', 'Wits ', h('b', w.wits)), h('span', 'Charm ', h('b', w.charm)),
+              w.band ? h('span', `${w.band} ${TROOPS[w.troop]?.name.toLowerCase() || ''}`) : null)), btn));
+      }
     }
     const marching = (st.marches || []).filter(m => m.from === pid && m.house === st.player);
     for (const m of marching) frag.append(h('div.ordered-note', { style: { marginTop: '6px' } },
@@ -291,24 +302,26 @@ export class RealmUI {
     const status = h('div.land-status');
     const note = () => {
       status.textContent = !mine ? `${HOUSE_BY_ID[pr.owner]?.name || 'A free hold'}'s land: you can look, not build.` :
-        pr.ordered ? 'This province has acted this month: new building waits for next month.' :
-        `Click a tile to build. One building or project a month · ${st.beta?.gold ? 'unlimited gold (beta tester)' : fmt(pr.gold) + ' gold here'}.`;
+        `Click tiles to build: as many buildings and projects as you can pay for (building does not use the month's order) · ${st.beta?.gold ? 'unlimited gold (beta tester)' : fmt(pr.gold) + ' gold here'}.`;
     };
     wrap.append(h('div.land-bar', h('h2', `${PROVINCES[pid].name}`, landQuality(st, pid) ? h('span.land-quality.q-' + landQuality(st, pid), landQuality(st, pid)) : null), status,
-      mine ? h('button.btn', { onclick: () => { sfx('click'); close(); this.app.apply({ type: 'build', province: pid, kind: 'dikes' }); }, title: 'Raise the dikes against floods (30 gold, uses the month)' }, `Dikes ${pr.dikes}`) : null,
+      mine ? h('button.btn', { onclick: () => { sfx('click'); close(); this.app.apply({ type: 'build', province: pid, kind: 'dikes' }); }, title: 'Raise the dikes against floods (30 gold)' }, `Dikes ${pr.dikes}`) : null,
+      mine && damagedCount(st, pid) ? h('button.btn', { onclick: () => {
+        sfx('click'); const r = this.app.apply({ type: 'build', province: pid, kind: 'repairAll' });
+        view.update(land, { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold });
+        status.textContent = r.msg; }, title: 'Repair every damaged building you can afford (half its cost each)' }, `Repair all (${damagedCount(st, pid)})`) : null,
       h('button.btn.primary', { onclick: close }, 'Close')), box);
     document.body.append(wrap);
     document.addEventListener('keydown', onKey);
     const view = openLandView(box, land, {
       province: PROVINCES[pid], house: pr.owner ? HOUSE_BY_ID[pr.owner] : null,
-      ctx: { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold }, readOnly: !mine || pr.ordered,
+      ctx: { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold }, readOnly: !mine,
       moment: this.landMoment(pid, land),
       onBuild: ({ x, y, kind }) => {
         const r = this.app.apply({ type: 'build', province: pid, x, y, kind });
         view.update(land, { ...landCtx(st, pid), realm: { goldMul: 0.6 * (0.5 + pr.loyalty / 200) }, free: mine && !!st.beta?.gold });
         if (r.ok) view.showMoment({ slot: LAND_MOMENT.building, title: 'Work begins', text: r.msg, ms: 1800 });
         note();
-        if (r.ok) setTimeout(close, 900);
         return r;
       },
     });
