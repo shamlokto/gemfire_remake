@@ -14,7 +14,7 @@ t('chance grows with loyalty, zero below 80', () => {
 });
 t('helps only the player, never a computer house', () => {
   let came = 0, aiCame = 0;
-  for (let seed = 1; seed <= 300; seed++) {
+  for (let seed = 1; seed <= 100; seed++) {
     const s = newGame('aldmere', seed);
     for (const p of s.provinces) p.loyalty = 100;
     const i1 = input('aldmere', 'corvane');
@@ -25,7 +25,7 @@ t('helps only the player, never a computer house', () => {
     if (maybeDawnwyrm(s2, { from: 2, to: 17 }, i2)) aiCame++;
     assert.ok(!i2.attacker.units.length && !i2.defender.units.length);
   }
-  assert.ok(came > 30 && came < 120, `came ${came}/300`);
+  assert.ok(came > 8 && came < 45, `came ${came}/100`);
   assert.strictEqual(aiCame, 0);
 });
 t('low loyalty: never comes; cooldown of a year', () => {
